@@ -1,0 +1,44 @@
+# Local agent and IDE state
+/.agents/
+/.idea/
+**/.idea/
+*.iml
+
+# Android / Gradle generated state
+/.gradle/
+**/.gradle/
+**/.kotlin/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+android/local.properties
+
+# Build outputs
+*.apk
+*.aab
+*.apks
+
+# Secrets and local signing material
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pem
+
+# Runtime, emulator and crash artifacts
+*.log
+hs_err_pid*
+replay_pid*
+/.emu-*.log
+/.w32time-*.log
+/.ui.xml
+
+# Historical root-level visual captures are local evidence. UX-2
+# report screenshots belong under docs/screenshots/ and remain tracked.
+/*.png
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store

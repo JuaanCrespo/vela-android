@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        VELA Android Lab manifest.
+
+        Phase 2.b status:
+          - INTERNET permission is requested. Scope is **strictly
+            limited to read-only Alpaca Market Data** via the test
+            WebSocket stream `wss://stream.data.alpaca.markets/v2/test`.
+            The only network caller in the codebase is
+            `data/market/source/alpaca/AlpacaTestStreamMarketDataClient`.
+            That client is gated by `AlpacaStreamEndpoint` which
+            rejects any URL except the test stream.
+          - No order submission. No account mutation. No trading
+            endpoints. The Phase 2.a boundary contract tests prove
+            via reflection that no trading method exists on the
+            market-data interface.
+          - No foreground service declared (deferred).
+          - allowBackup=false to prevent backup agents from copying
+            future EncryptedSharedPreferences blobs.
+          - Single Activity (MainActivity) hosts the Compose tree.
+          - Process-scoped Application class (VelaLabApplication) owns
+            the Room database and the offline pipeline coordinator.
+    -->
+
+    <!--
+        Phase 2.b: read-only Alpaca Market Data test stream only.
+        No INTERNET-consuming code path other than the test stream
+        client exists in the lab.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".VelaLabApplication"
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

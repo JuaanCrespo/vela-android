@@ -1,0 +1,517 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "a665f2ad0ca502c9d7ec32633a49ee04",
+    "entities": [
+      {
+        "tableName": "market_bars_1m",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `symbol` TEXT NOT NULL, `bucketStartEpochMillis` INTEGER NOT NULL, `open` REAL NOT NULL, `high` REAL NOT NULL, `low` REAL NOT NULL, `close` REAL NOT NULL, `updateCount` INTEGER NOT NULL, `syntheticVolume` REAL NOT NULL, `lastUpdateTimeEpochMillis` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketStartEpochMillis",
+            "columnName": "bucketStartEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "open",
+            "columnName": "open",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "high",
+            "columnName": "high",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "low",
+            "columnName": "low",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "close",
+            "columnName": "close",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updateCount",
+            "columnName": "updateCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syntheticVolume",
+            "columnName": "syntheticVolume",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastUpdateTimeEpochMillis",
+            "columnName": "lastUpdateTimeEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "uq_market_bars_1m_symbol_bucket",
+            "unique": true,
+            "columnNames": [
+              "symbol",
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `uq_market_bars_1m_symbol_bucket` ON `${TABLE_NAME}` (`symbol`, `bucketStartEpochMillis`)"
+          },
+          {
+            "name": "ix_market_bars_1m_bucket",
+            "unique": false,
+            "columnNames": [
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_market_bars_1m_bucket` ON `${TABLE_NAME}` (`bucketStartEpochMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "symbol_features",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `symbol` TEXT NOT NULL, `bucketStartEpochMillis` INTEGER NOT NULL, `shortReturn` REAL NOT NULL, `percentChange` REAL NOT NULL, `barRange` REAL NOT NULL, `direction` TEXT NOT NULL, `recentBarCount` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketStartEpochMillis",
+            "columnName": "bucketStartEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shortReturn",
+            "columnName": "shortReturn",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "percentChange",
+            "columnName": "percentChange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "barRange",
+            "columnName": "barRange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recentBarCount",
+            "columnName": "recentBarCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "uq_symbol_features_symbol_bucket",
+            "unique": true,
+            "columnNames": [
+              "symbol",
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `uq_symbol_features_symbol_bucket` ON `${TABLE_NAME}` (`symbol`, `bucketStartEpochMillis`)"
+          },
+          {
+            "name": "ix_symbol_features_bucket",
+            "unique": false,
+            "columnNames": [
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_symbol_features_bucket` ON `${TABLE_NAME}` (`bucketStartEpochMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "symbol_signals",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `symbol` TEXT NOT NULL, `bucketStartEpochMillis` INTEGER NOT NULL, `state` TEXT NOT NULL, `score` INTEGER NOT NULL, `shortReturn` REAL NOT NULL, `percentChange` REAL NOT NULL, `barRange` REAL NOT NULL, `direction` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketStartEpochMillis",
+            "columnName": "bucketStartEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "score",
+            "columnName": "score",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shortReturn",
+            "columnName": "shortReturn",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "percentChange",
+            "columnName": "percentChange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "barRange",
+            "columnName": "barRange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "uq_symbol_signals_symbol_bucket",
+            "unique": true,
+            "columnNames": [
+              "symbol",
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `uq_symbol_signals_symbol_bucket` ON `${TABLE_NAME}` (`symbol`, `bucketStartEpochMillis`)"
+          },
+          {
+            "name": "ix_symbol_signals_bucket",
+            "unique": false,
+            "columnNames": [
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_symbol_signals_bucket` ON `${TABLE_NAME}` (`bucketStartEpochMillis`)"
+          },
+          {
+            "name": "ix_symbol_signals_state",
+            "unique": false,
+            "columnNames": [
+              "state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_symbol_signals_state` ON `${TABLE_NAME}` (`state`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "journal_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `symbol` TEXT, `eventType` TEXT NOT NULL, `timestampEpochMillis` INTEGER NOT NULL, `payloadJson` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestampEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payloadJson",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ix_journal_events_timestamp",
+            "unique": false,
+            "columnNames": [
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_journal_events_timestamp` ON `${TABLE_NAME}` (`timestampEpochMillis`)"
+          },
+          {
+            "name": "ix_journal_events_symbol_timestamp",
+            "unique": false,
+            "columnNames": [
+              "symbol",
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_journal_events_symbol_timestamp` ON `${TABLE_NAME}` (`symbol`, `timestampEpochMillis`)"
+          },
+          {
+            "name": "ix_journal_events_event_type",
+            "unique": false,
+            "columnNames": [
+              "eventType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_journal_events_event_type` ON `${TABLE_NAME}` (`eventType`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "paper_order_dry_run_audits",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `clientDryRunId` TEXT NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `symbol` TEXT NOT NULL, `side` TEXT NOT NULL, `orderType` TEXT NOT NULL, `timeInForce` TEXT NOT NULL, `quantity` REAL NOT NULL, `limitPriceUsd` REAL, `status` TEXT NOT NULL, `estimatedNotionalUsd` REAL, `buyingPowerAfterUsd` REAL, `allocationPercentAfter` REAL, `latestPriceUsedUsd` REAL, `latestSignalState` TEXT, `marketOpen` INTEGER, `blockReasonsSummary` TEXT NOT NULL, `warningsSummary` TEXT NOT NULL, `source` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientDryRunId",
+            "columnName": "clientDryRunId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderType",
+            "columnName": "orderType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeInForce",
+            "columnName": "timeInForce",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "limitPriceUsd",
+            "columnName": "limitPriceUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "estimatedNotionalUsd",
+            "columnName": "estimatedNotionalUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "buyingPowerAfterUsd",
+            "columnName": "buyingPowerAfterUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "allocationPercentAfter",
+            "columnName": "allocationPercentAfter",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestPriceUsedUsd",
+            "columnName": "latestPriceUsedUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestSignalState",
+            "columnName": "latestSignalState",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "marketOpen",
+            "columnName": "marketOpen",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "blockReasonsSummary",
+            "columnName": "blockReasonsSummary",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "warningsSummary",
+            "columnName": "warningsSummary",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ix_paper_dry_run_created_at",
+            "unique": false,
+            "columnNames": [
+              "createdAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_dry_run_created_at` ON `${TABLE_NAME}` (`createdAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_dry_run_symbol_created_at",
+            "unique": false,
+            "columnNames": [
+              "symbol",
+              "createdAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_dry_run_symbol_created_at` ON `${TABLE_NAME}` (`symbol`, `createdAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_dry_run_client_id",
+            "unique": true,
+            "columnNames": [
+              "clientDryRunId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ix_paper_dry_run_client_id` ON `${TABLE_NAME}` (`clientDryRunId`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a665f2ad0ca502c9d7ec32633a49ee04')"
+    ]
+  }
+}
