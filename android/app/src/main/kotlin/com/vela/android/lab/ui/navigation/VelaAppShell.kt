@@ -1,15 +1,19 @@
 package com.vela.android.lab.ui.navigation
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -32,6 +36,14 @@ import com.vela.android.lab.ui.theme.VelaPillTone
 import com.vela.android.lab.ui.theme.VelaSafetyBanner
 import com.vela.android.lab.ui.theme.VelaSectionHeader
 import com.vela.android.lab.ui.theme.VelaStatusPill
+
+internal object VelaBottomNavigationTokens {
+    val HorizontalInset = 12.dp
+    val BottomInset = 8.dp
+    val CornerRadius = 28.dp
+    val ShadowElevation = 8.dp
+    val BorderWidth = 1.dp
+}
 
 /**
  * Persistent phone shell for UX-2.
@@ -164,34 +176,58 @@ fun VelaBottomNavigation(
     modifier: Modifier = Modifier,
 ) {
     val selectedPrimary = currentDestination.selectedPrimaryDestination
-    NavigationBar(
-        modifier = modifier.fillMaxWidth(),
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 4.dp,
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(
+                start = VelaBottomNavigationTokens.HorizontalInset,
+                end = VelaBottomNavigationTokens.HorizontalInset,
+                bottom = VelaBottomNavigationTokens.BottomInset,
+            ),
     ) {
-        VelaDestination.primaryDestinations.forEach { destination ->
-            NavigationBarItem(
-                selected = selectedPrimary == destination,
-                onClick = { onDestinationSelected(destination) },
-                icon = {
-                    Text(
-                        text = destination.navigationGlyph,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(VelaBottomNavigationTokens.CornerRadius),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = VelaBottomNavigationTokens.ShadowElevation,
+            border = BorderStroke(
+                width = VelaBottomNavigationTokens.BorderWidth,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f),
+            ),
+        ) {
+            NavigationBar(
+                modifier = Modifier.fillMaxWidth(),
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                tonalElevation = 0.dp,
+                windowInsets = WindowInsets(0, 0, 0, 0),
+            ) {
+                VelaDestination.primaryDestinations.forEach { destination ->
+                    NavigationBarItem(
+                        selected = selectedPrimary == destination,
+                        onClick = { onDestinationSelected(destination) },
+                        icon = {
+                            Text(
+                                text = destination.navigationGlyph,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = destination.label,
+                                maxLines = 1,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        },
+                        alwaysShowLabel = true,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Abrir ${destination.label}"
+                        },
                     )
-                },
-                label = {
-                    Text(
-                        text = destination.label,
-                        maxLines = 1,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                },
-                alwaysShowLabel = true,
-                modifier = Modifier.semantics {
-                    contentDescription = "Abrir ${destination.label}"
-                },
-            )
+                }
+            }
         }
     }
 }
