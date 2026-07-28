@@ -10,17 +10,16 @@ package com.vela.android.lab.ui.navigation
 enum class VelaDestination(
     val route: String,
     val label: String,
-    val navigationGlyph: String,
 ) {
-    HOME(route = "inicio", label = "Inicio", navigationGlyph = "I"),
-    MARKET(route = "mercado", label = "Mercado", navigationGlyph = "M"),
-    CANDLES(route = "velas", label = "Velas", navigationGlyph = "V"),
-    PAPER(route = "paper", label = "Paper", navigationGlyph = "P"),
-    MORE(route = "mas", label = "Más", navigationGlyph = "+"),
-    RISK(route = "riesgo", label = "Riesgo", navigationGlyph = "R"),
-    HISTORY(route = "historial", label = "Historial y auditoría", navigationGlyph = "H"),
-    SETTINGS(route = "configuracion", label = "Configuración", navigationGlyph = "C"),
-    DIAGNOSTICS(route = "diagnostico", label = "Diagnóstico", navigationGlyph = "D"),
+    HOME(route = "inicio", label = "Inicio"),
+    MARKET(route = "mercado", label = "Mercado"),
+    CANDLES(route = "velas", label = "Velas"),
+    PAPER(route = "paper", label = "Paper"),
+    MORE(route = "mas", label = "Más"),
+    RISK(route = "riesgo", label = "Riesgo"),
+    HISTORY(route = "historial", label = "Historial y auditoría"),
+    SETTINGS(route = "configuracion", label = "Configuración"),
+    DIAGNOSTICS(route = "diagnostico", label = "Diagnóstico"),
     ;
 
     val isPrimary: Boolean

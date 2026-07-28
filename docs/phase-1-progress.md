@@ -9621,3 +9621,82 @@ Safe screenshots:
 | Phase 2.w started | NO |
 
 UX-2 stops here. No runtime Paper chain and no Phase 2.w were started.
+
+---
+
+## UX-2 navigation polish — compact bottom bar (2026-07-28)
+
+Ajuste visual puro sobre la barra inferior de UX-2. Sin runtime Paper, sin `MANUAL_PAPER_SUBMIT_COMPILED`, sin cambios en `data/paper/**`, gates, ViewModels, Room, clientes HTTP ni scripts de seguridad.
+
+### A. Alcance
+Reemplazo del `NavigationBar` + `NavigationBarItem` de Material 3 (cuyo pill de 64 dp se desbordaba sobre las esquinas redondeadas del contenedor en los ítems de los extremos) por un composable custom `VelaBottomNavigationItem` con pill de tamaño controlado por tokens. Íconos vectoriales reemplazan los glyphs por letras (`I / M / V / P / +`), y el contenedor se compactó (ancho, altura y esquinas) para que los cinco destinos queden espaciados de forma armónica sin que el pill del ítem seleccionado toque la esquina del contenedor.
+
+### B. Archivos tocados
+| Archivo | Naturaleza |
+| --- | --- |
+| `android/app/src/main/kotlin/com/vela/android/lab/ui/navigation/VelaAppShell.kt` | Reemplazo del composable de la barra + nuevo `VelaBottomNavigationItem` + nuevos tokens en `VelaBottomNavigationTokens`. |
+| `android/app/src/main/kotlin/com/vela/android/lab/ui/navigation/VelaDestination.kt` | Removida la propiedad `navigationGlyph` (ya no se usan letras). |
+| `android/app/src/main/res/drawable/ic_nav_home.xml` | Nuevo — ícono vectorial casa (Inicio). |
+| `android/app/src/main/res/drawable/ic_nav_market.xml` | Nuevo — ícono vectorial gráfico de línea (Mercado). |
+| `android/app/src/main/res/drawable/ic_nav_candles.xml` | Nuevo — 3 velas claramente distinguibles (Velas). |
+| `android/app/src/main/res/drawable/ic_nav_paper.xml` | Nuevo — ícono vectorial documento (Paper). |
+| `android/app/src/main/res/drawable/ic_nav_more.xml` | Nuevo — tres puntos horizontales (Más). |
+| `android/app/src/test/kotlin/com/vela/android/lab/ui/navigation/VelaBottomNavigationStyleTest.kt` | Congela los nuevos tokens + verifica el contrato de la nueva implementación (custom item, no NavigationBar). |
+
+### C. Tokens finales (`VelaBottomNavigationTokens`)
+| Token | Valor |
+| --- | --- |
+| `HorizontalInset` | `20 dp` |
+| `BottomInset` | `8 dp` |
+| `CornerRadius` (container) | `20 dp` |
+| `ShadowElevation` | `8 dp` |
+| `BorderWidth` | `1 dp` |
+| `MaxWidth` (container) | `320 dp` |
+| `NavigationBarHeight` | `56 dp` |
+| `IconSize` | `18 dp` |
+| `IndicatorAlpha` | `0.24f` |
+| `PillWidth` | `48 dp` |
+| `PillHeight` | `28 dp` |
+| `PillCornerRadius` | `14 dp` |
+| `ItemLabelSpacing` | `2 dp` |
+
+Cada celda mide `320 / 5 = 64 dp`; con pill de `48 dp` queda `8 dp` de margen a cada lado en cada ítem → el pill nunca toca la esquina de `20 dp` del contenedor, incluidos Inicio y Más.
+
+### D. Validación
+| Ítem | Resultado |
+| --- | --- |
+| `git diff` scope | Solamente `ui/navigation/*` + drawables + test de estilo. Ningún cambio en `data/paper/**`, gates, ViewModels, Room, clientes HTTP ni scripts. Sin referencias a `submitOnce`, `preflight`, `arm(`, `POST`, `http://`, `wss://`, `unlockRealMode`, `canExecuteOrders`. |
+| `local.properties` | Limpio — `MANUAL_PAPER_SUBMIT_COMPILED` **ausente**. |
+| `app/build.gradle.kts` | `defaultConfig` y `release` mantienen `buildConfigField "boolean", "MANUAL_PAPER_SUBMIT_COMPILED", "false"` como fallback hard-coded. |
+| Debug `BuildConfig.MANUAL_PAPER_SUBMIT_COMPILED` en la APK recién construida | `false` (verificado leyendo `app/build/generated/source/buildConfig/.../BuildConfig.java`). |
+| `.\scripts\safety-scan.ps1` | `Safety scan summary: allowed_phase2v_submit=11 suspicious=0 forbidden=0`. |
+| `:app:testDebugUnitTest` | 83 archivos XML, `tests=1555 failures=0 errors=0 skipped=0`. |
+| `:app:assembleDebug --no-build-cache --rerun-tasks` | `BUILD SUCCESSFUL in 1m 33s` — 39/39 tasks re-ejecutadas. |
+| APK SHA-256 | `E94AF6515E5F094B5AF4331E1231D770E952C436864B54D9BFB5BEB5ABE73177`. |
+| APK size | `27 270 405` bytes. |
+| Validación visual on-device | Instalada en `VELA_Runtime_API34` (AVD con ventana visible; `VELA_Lite` retenido intacto). Cinco destinos visibles y navegables, ningún pill se desborda, Inicio y Más conservan margen entre pill y esquina, labels visibles, safety banner con seis pills mint incluyendo `Manual submit compiled=false`, Mode `READ_ONLY`, `REAL locked`, sin credenciales visibles, sin crash. App force-stopped al terminar. |
+
+### E. Atestación
+| Campo | Valor |
+| --- | --- |
+| Trading logic modified | **NO** |
+| Submit gates modified | **NO** |
+| ViewModels / Room / HTTP clients modified | **NO** |
+| Scripts de seguridad modified | **NO** |
+| `MANUAL_PAPER_SUBMIT_COMPILED` | `false` (debug y release) |
+| `local.properties` | limpio |
+| Runtime submit intentado | **NO** |
+| Session armada | **NO** |
+| Token generado | **NO** |
+| Confirmación solicitada | **NO** |
+| POST ejecutado | **`0`** |
+| REAL locked | `true` |
+| LIVE endpoint used | **NO** |
+| Auto Paper | `false` |
+| Cancel / replace / close | **NO** |
+| Credentials leaked / logged | **NO** |
+| `G:\vela` touched | **NO** |
+| Windows `vela.db` opened / read | **NO** |
+| Phase 2.w started | **NO** |
+
+**UX-2 navigation polish stop.** Baseline visual congelado. Listo para retomar el runtime Paper autorizado sin arrastrar cambios pendientes.

@@ -1,23 +1,29 @@
 package com.vela.android.lab.ui.navigation
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -26,10 +32,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.vela.android.lab.R
 import com.vela.android.lab.ui.settings.VelaUiDensity
 import com.vela.android.lab.ui.theme.LocalVelaColors
 import com.vela.android.lab.ui.theme.VelaPillTone
@@ -38,11 +48,28 @@ import com.vela.android.lab.ui.theme.VelaSectionHeader
 import com.vela.android.lab.ui.theme.VelaStatusPill
 
 internal object VelaBottomNavigationTokens {
-    val HorizontalInset = 12.dp
+    val HorizontalInset = 20.dp
     val BottomInset = 8.dp
-    val CornerRadius = 28.dp
+    val CornerRadius = 20.dp
     val ShadowElevation = 8.dp
     val BorderWidth = 1.dp
+    val MaxWidth = 320.dp
+    val IconSize = 18.dp
+    val NavigationBarHeight = 56.dp
+    val IndicatorAlpha = 0.24f
+    val PillWidth = 48.dp
+    val PillHeight = 28.dp
+    val PillCornerRadius = 14.dp
+    val ItemLabelSpacing = 2.dp
+}
+
+internal fun VelaDestination.bottomNavigationIconRes(): Int = when (this) {
+    VelaDestination.HOME -> R.drawable.ic_nav_home
+    VelaDestination.MARKET -> R.drawable.ic_nav_market
+    VelaDestination.CANDLES -> R.drawable.ic_nav_candles
+    VelaDestination.PAPER -> R.drawable.ic_nav_paper
+    VelaDestination.MORE -> R.drawable.ic_nav_more
+    else -> error("Only primary destinations have bottom navigation icons: $this")
 }
 
 /**
@@ -187,7 +214,10 @@ fun VelaBottomNavigation(
             ),
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .align(Alignment.Center)
+                .widthIn(max = VelaBottomNavigationTokens.MaxWidth)
+                .fillMaxWidth(),
             shape = RoundedCornerShape(VelaBottomNavigationTokens.CornerRadius),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 4.dp,
@@ -197,38 +227,77 @@ fun VelaBottomNavigation(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f),
             ),
         ) {
-            NavigationBar(
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                tonalElevation = 0.dp,
-                windowInsets = WindowInsets(0, 0, 0, 0),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(VelaBottomNavigationTokens.NavigationBarHeight),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 VelaDestination.primaryDestinations.forEach { destination ->
-                    NavigationBarItem(
+                    VelaBottomNavigationItem(
                         selected = selectedPrimary == destination,
+                        label = destination.label,
+                        iconRes = destination.bottomNavigationIconRes(),
                         onClick = { onDestinationSelected(destination) },
-                        icon = {
-                            Text(
-                                text = destination.navigationGlyph,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = destination.label,
-                                maxLines = 1,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        },
-                        alwaysShowLabel = true,
-                        modifier = Modifier.semantics {
-                            contentDescription = "Abrir ${destination.label}"
-                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .semantics {
+                                contentDescription = "Abrir ${destination.label}"
+                            },
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VelaBottomNavigationItem(
+    selected: Boolean,
+    label: String,
+    iconRes: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val velaColors = LocalVelaColors.current
+    val contentColor = if (selected) velaColors.safe else velaColors.muted
+    val pillColor = if (selected) {
+        velaColors.safe.copy(alpha = VelaBottomNavigationTokens.IndicatorAlpha)
+    } else {
+        Color.Transparent
+    }
+    Column(
+        modifier = modifier
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(
+                    width = VelaBottomNavigationTokens.PillWidth,
+                    height = VelaBottomNavigationTokens.PillHeight,
+                )
+                .clip(RoundedCornerShape(VelaBottomNavigationTokens.PillCornerRadius))
+                .background(pillColor),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(VelaBottomNavigationTokens.IconSize),
+            )
+        }
+        Spacer(modifier = Modifier.height(VelaBottomNavigationTokens.ItemLabelSpacing))
+        Text(
+            text = label,
+            color = contentColor,
+            maxLines = 1,
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 
