@@ -286,4 +286,13 @@ if ([int]$earlyResult.ExitCode -ne 1 -or
 }
 $script:TestsRun++
 
+# 14. Normal uppercase H index tags stay safe; hidden tags fail closed.
+if ((Test-GitIndexEntryUnsafe -Line 'H tracked-file') -or
+    -not (Test-GitIndexEntryUnsafe -Line 'h assume-unchanged-file') -or
+    -not (Test-GitIndexEntryUnsafe -Line 'S skip-worktree-file')
+) {
+    throw 'Git index tag matching is not case-sensitive and fail-closed.'
+}
+$script:TestsRun++
+
 Write-Output "VERIFY_SAFE_APK_SELF_TEST_PASS tests=$script:TestsRun"

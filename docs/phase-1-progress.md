@@ -9805,7 +9805,7 @@ This verifies strong checkout and artifact safety invariants, not a cryptographi
 
 ### Tests and final static validation
 
-The PowerShell evidence-policy self-test covers thirteen cases: flag absent PASS; flag true FAIL; dirty worktree FAIL; HEAD/origin mismatch FAIL; literal-true FeatureGate call site FAIL; unexpected certificate FAIL; suspicious safety scan FAIL; two different valid build SHA values both PASS; a second true DEX constructor FAIL; missing final-state evidence FAIL; continued and Unicode-escaped true Java Properties keys both FAIL; and an initially dirty checkout exits before local-property, SDK or APK-byte inspection.
+The PowerShell evidence-policy self-test covers fourteen cases: flag absent PASS; flag true FAIL; dirty worktree FAIL; HEAD/origin mismatch FAIL; literal-true FeatureGate call site FAIL; unexpected certificate FAIL; suspicious safety scan FAIL; two different valid build SHA values both PASS; a second true DEX constructor FAIL; missing final-state evidence FAIL; continued and Unicode-escaped true Java Properties keys both FAIL; an initially dirty checkout exits before local-property, SDK or APK-byte inspection; and normal `H` versus hidden `h`/`S` Git index tags are distinguished case-sensitively.
 
 The JUnit suite executes that matrix as part of `:app:testDebugUnitTest`:
 
@@ -9814,7 +9814,7 @@ The JUnit suite executes that matrix as part of `:app:testDebugUnitTest`:
 - failures: 0;
 - errors: 0;
 - skipped: 0;
-- final forced rerun: `BUILD SUCCESSFUL in 1m 33s`, 26/26 tasks executed with `--rerun-tasks`.
+- final forced rerun: `BUILD SUCCESSFUL in 1m 31s`, 26/26 tasks executed with `--rerun-tasks`.
 
 Final static safety scan before commit:
 

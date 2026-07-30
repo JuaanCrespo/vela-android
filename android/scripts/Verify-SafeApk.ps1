@@ -784,6 +784,12 @@ function Invoke-CapturedSdkJavaTool {
     }
 }
 
+function Test-GitIndexEntryUnsafe {
+    param([Parameter(Mandatory)][string]$Line)
+
+    return $Line -cmatch '^(?:[a-z]|S)\s'
+}
+
 function Get-GitSnapshot {
     param(
         [Parameter(Mandatory)][string]$GitPath,
@@ -863,7 +869,7 @@ function Get-GitSnapshot {
 
     $statusLines = @(Get-NonEmptyLines $statusResult.Lines)
     $hiddenIndexFlags = @(Get-NonEmptyLines $indexResult.Lines) |
-        Where-Object { $_ -match '^(?:[a-z]|S)\s' }
+        Where-Object { Test-GitIndexEntryUnsafe -Line $_ }
     if ($hiddenIndexFlags.Count -ne 0) {
         $statusLines += '__GIT_INDEX_FLAGS_UNSAFE__'
     }

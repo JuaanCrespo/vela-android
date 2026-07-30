@@ -38,7 +38,7 @@ class SafeApkProvenanceScriptTest {
         assertEquals(0, process.exitValue(), output.take(2_000))
         assertTrue(
             output.lineSequence().any {
-                it.trim() == "VERIFY_SAFE_APK_SELF_TEST_PASS tests=13"
+                it.trim() == "VERIFY_SAFE_APK_SELF_TEST_PASS tests=14"
             },
             output.take(2_000),
         )
