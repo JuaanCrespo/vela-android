@@ -9700,3 +9700,143 @@ Cada celda mide `320 / 5 = 64 dp`; con pill de `48 dp` queda `8 dp` de margen a 
 | Phase 2.w started | **NO** |
 
 **UX-2 navigation polish stop.** Baseline visual congelado. Listo para retomar el runtime Paper autorizado sin arrastrar cambios pendientes.
+
+---
+
+## Safe APK provenance and reproducibility audit after SHA mismatch (2026-07-30)
+
+The precheck stopped at `BLOCKED_SAFE_APK_MISMATCH` because it compared the current debug APK with the historical fixed SHA-256 `E94AF6515E5F094B5AF4331E1231D770E952C436864B54D9BFB5BEB5ABE73177`. No copy of that historical `E94...` artifact was available for a direct byte comparison; the controlled A/B rebuild below demonstrates the current D8 nondeterminism and why a permanent whole-APK baseline is unsafe, not a byte-for-byte `E94...` to current-APK transition. This audit did not install or launch an APK and did not execute any Paper runtime action.
+
+### Preserved evidence and build conditions
+
+Before rebuilding, the existing APK was copied to the Git-ignored `.runtime-audit/apk-before.apk`. The root `.gitignore` now explicitly excludes `/.runtime-audit/`; no APK or runtime-audit artifact is part of the commit.
+
+| Artifact | SHA-256 | Size | UTC timestamp |
+| --- | --- | ---: | --- |
+| Preserved pre-audit APK | `F7791AFF07FC1B1A656839E29AD51BA76079EBB4B66010871711C582B395DCEB` | 27,270,411 bytes | `2026-07-28T20:21:16.3169199Z` |
+| Build A | `57FBE79800D38A025EA2C13C84FC2617129804E62390B7DE4748E98136A82C68` | 27,270,405 bytes | `2026-07-30T19:06:15.4701592Z` |
+| Build B / final APK | `E078C300DB5CB23ADF0089507CDC513E29457D1F6557A1FE966C272B6591650A` | 27,270,405 bytes | `2026-07-30T19:08:38.2578558Z` |
+
+Build A and Build B used the exact same command, with clean `local.properties` and no source change between runs:
+
+```powershell
+.\gradlew.bat :app:assembleDebug `
+  --console=plain `
+  --no-daemon `
+  --no-build-cache `
+  --rerun-tasks `
+  '-Dorg.gradle.jvmargs=-Xmx1024m -XX:MaxMetaspaceSize=512m -XX:+UseSerialGC -Dfile.encoding=UTF-8'
+```
+
+Both builds succeeded with 39/39 tasks executed. Neither APK was installed.
+
+### APK comparison and exact mismatch cause
+
+The three APKs contain 166 ZIP entries. Build A and Build B differ in exactly ten entries:
+
+- `classes3.dex`;
+- `classes4.dex`;
+- `classes6.dex`;
+- `classes7.dex`;
+- `classes9.dex`;
+- `classes10.dex`;
+- `classes11.dex`;
+- `classes12.dex`;
+- `classes13.dex`;
+- `classes14.dex`.
+
+The other 156 uncompressed entries are byte-identical, including `AndroidManifest.xml`, `resources.arsc`, `res/**`, `assets/**` and native libraries. Build A and Build B also preserve ZIP order, timestamps and attributes. The preserved APK uses a different order for 165 entries, but its functional payload has the same result described below.
+
+D8 writes a private `~~~{...}` string with per-class checksums into each affected DEX and declares `has-checksums:true`. Exactly 270 checksum values change from the preserved APK to Build A and again from Build A to Build B; every changed value belongs exclusively to an R8/D8-generated `$$ExternalSyntheticLambda*` class. Changing checksum values changes each affected DEX checksum/signature and the APK v2 signature; variations in serialized JSON length additionally account for the four-byte DEX size changes and shifted offsets.
+
+Functional equivalence was demonstrated rather than inferred from file size:
+
+- `dexdump -d -n` is identical for all ten changed DEX files across the preserved APK, Build A and Build B;
+- 5,785 methods have identical instructions, registers, inputs/outputs, code sizes and `try/catch` structures;
+- `dexdump -d` including debug information is identical after removing only the two tool-generated input-path lines;
+- source positions, locals, source files, annotations and `debug_info` structure are identical;
+- after removing only the D8 checksum marker, all ten string pools are identical;
+- decoded manifest and resources are identical;
+- all three APKs pass `zipalign -c 4` and `zipalign -c -P 16 4`.
+
+### Provenance and safety invariants
+
+All three APKs pass `apksigner verify` with APK Signature Scheme v2, one signer and no warning. The approved debug certificate SHA-256 is:
+
+`C0106E6DF46127F68C312818124AB628637EFD348E43B175DD4605E97C697ADC`
+
+The final APK metadata is:
+
+| Field | Verified value |
+| --- | --- |
+| Package | `com.vela.android.lab` |
+| versionCode / versionName | `1` / `0.1.0-phase1` |
+| compileSdk / minSdk / targetSdk | `34` / `29` / `34` |
+| Debuggable | `true` |
+| Debug `MANUAL_PAPER_SUBMIT_COMPILED` | `false` in effective DEX |
+| Release `MANUAL_PAPER_SUBMIT_COMPILED` | hard-coded `false` in source |
+| FeatureGate call site | `BuildConfig.MANUAL_PAPER_SUBMIT_COMPILED` |
+| FeatureGate constructor in final DEX | constant boolean `false` |
+| LIVE trading endpoint usable / enabled | **NO**; its URL literal exists only in defensive rejection guards and was not used |
+
+### Verdict
+
+**B. NONDETERMINISTIC_PACKAGING_SAFE.** Build A and Build B do not have the same whole-file SHA-256, so this is not `REPRODUCIBLE_BUILD`. The variation is private D8 checksum metadata for generated lambdas and its derived container/signature bytes; executable instructions, debug semantics, resources, manifest, effective safety flag and approved signing certificate are equivalent. No functional difference or unexpected signer was found.
+
+### Hardened verification procedure
+
+`android/scripts/Verify-SafeApk.ps1` replaces the historical fixed-hash gate. It is read-only and checks:
+
+- local `HEAD` equals the local `refs/remotes/origin/main` ref, branch is `main`, the worktree is clean at both the start and end, and no tracked path is hidden by `assume-unchanged` or `skip-worktree`;
+- the initial clean-check passes before reading `local.properties`, reading build sources, resolving Android tools or inspecting APK bytes;
+- Git, Android SDK 34.0.0 tools, `apkanalyzer` and the Android Studio JBR come only from approved absolute paths with no reparse point in their trust-root path;
+- `GIT_*` overrides are cleared for Git evidence; Java wrapper injection variables are cleared, while `JAVA_HOME` and `ComSpec` are fixed for `apksigner` and `apkanalyzer`;
+- Java Properties logical-line parsing, including continuations and Unicode escapes, finds no active true or ambiguous manual compile override and accepts only the approved `sdk.dir`, without printing unrelated properties;
+- default/debug/release BuildConfig source contracts and the exact `VelaLabApplication` call site;
+- the final APK's effective FeatureGate constructor receives exactly one DEX constant `false`, without decompiling `BuildConfig` or exposing credential fields;
+- package/version/SDK/debuggable metadata;
+- valid v2 signature, one signer and the approved debug certificate;
+- safety scan `11 / 0 / 0`;
+- APK existence, size, UTC mtime and current SHA-256 while a read-shared file handle blocks writes/deletion, with identity repeated at the end.
+
+The script performs no Gradle build, ADB action, install, app launch, network access, database access or runtime action. It scans `local.properties` only to evaluate `sdk.dir` and the manual flag; it never extracts, prints or logs credential values. The SHA-256 is reported as the identifier of the current artifact and installation evidence; it is deliberately not compared with a permanent historical APK hash.
+
+This verifies strong checkout and artifact safety invariants, not a cryptographic byte-for-byte attestation from every APK byte to a Git commit. `origin/main` is the local remote-tracking ref because the verifier intentionally performs no network operation.
+
+### Tests and final static validation
+
+The PowerShell evidence-policy self-test covers thirteen cases: flag absent PASS; flag true FAIL; dirty worktree FAIL; HEAD/origin mismatch FAIL; literal-true FeatureGate call site FAIL; unexpected certificate FAIL; suspicious safety scan FAIL; two different valid build SHA values both PASS; a second true DEX constructor FAIL; missing final-state evidence FAIL; continued and Unicode-escaped true Java Properties keys both FAIL; and an initially dirty checkout exits before local-property, SDK or APK-byte inspection.
+
+The JUnit suite executes that matrix as part of `:app:testDebugUnitTest`:
+
+- suites: 84;
+- tests: 1,556;
+- failures: 0;
+- errors: 0;
+- skipped: 0;
+- final forced rerun: `BUILD SUCCESSFUL in 1m 33s`, 26/26 tasks executed with `--rerun-tasks`.
+
+Final static safety scan before commit:
+
+- `allowed_phase2v_submit=11`;
+- `suspicious=0`;
+- `forbidden=0`.
+
+### Safety attestation
+
+| Item | Result |
+| --- | --- |
+| Trading logic or submit gates modified | **NO** |
+| `data/paper/**`, ViewModels, Room or HTTP clients modified | **NO** |
+| Paper runtime attempted during this audit | **NO** |
+| Build A / Build B / final APK installed or app opened during this audit | **NO** |
+| Manual compile flag activated | **NO** (`false`) |
+| Session armed / token / confirmation | **NO / NO / NO** |
+| POST executed | **0** |
+| LIVE / REAL / Auto Paper | **NO / NO / NO** |
+| Cancel / replace / close | **NO** |
+| Credentials displayed or logged | **NO** |
+| `G:\vela` or Windows `vela.db` touched | **NO** |
+| Phase 2.w started | **NO** |
+
+The audit stops here. The pre-audit environment may have contained an older installed APK, but the preserved APK, Build A, Build B and the final APK were not installed or launched during this audit, and no Paper runtime chain was started.

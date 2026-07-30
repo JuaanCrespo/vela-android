@@ -27,6 +27,7 @@ android/local.properties
 *.pem
 
 # Runtime, emulator and crash artifacts
+/.runtime-audit/
 *.log
 hs_err_pid*
 replay_pid*
