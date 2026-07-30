@@ -868,8 +868,10 @@ function Get-GitSnapshot {
     }
 
     $statusLines = @(Get-NonEmptyLines $statusResult.Lines)
-    $hiddenIndexFlags = @(Get-NonEmptyLines $indexResult.Lines) |
-        Where-Object { Test-GitIndexEntryUnsafe -Line $_ }
+    $hiddenIndexFlags = @(
+        @(Get-NonEmptyLines $indexResult.Lines) |
+            Where-Object { Test-GitIndexEntryUnsafe -Line $_ }
+    )
     if ($hiddenIndexFlags.Count -ne 0) {
         $statusLines += '__GIT_INDEX_FLAGS_UNSAFE__'
     }
