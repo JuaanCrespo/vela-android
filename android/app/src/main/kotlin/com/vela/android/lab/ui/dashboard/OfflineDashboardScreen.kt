@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vela.android.lab.data.market.tick.PerSymbolTickStats
 import com.vela.android.lab.data.market.tick.TickBufferSnapshot
 import com.vela.android.lab.data.paper.RiskFlag
 import com.vela.android.lab.data.paper.preflight.OrderSide
@@ -48,7 +49,9 @@ import com.vela.android.lab.ui.settings.VelaTimeFormat
 import com.vela.android.lab.ui.theme.LocalVelaColors
 import com.vela.android.lab.ui.theme.VelaActionZone
 import com.vela.android.lab.ui.theme.VelaBlockedReasonList
+import com.vela.android.lab.ui.theme.VelaEmptyState
 import com.vela.android.lab.ui.theme.VelaLabTheme
+import com.vela.android.lab.ui.theme.VelaMetricCard
 import com.vela.android.lab.ui.theme.VelaPillTone
 import com.vela.android.lab.ui.theme.VelaSafetyBanner
 import com.vela.android.lab.ui.theme.VelaSectionHeader
@@ -1626,64 +1629,223 @@ internal fun MarketHistoryCard(
 @Composable
 internal fun TickDiagnosticsCard(snapshot: TickBufferSnapshot) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            SectionTitle("Tick / quote diagnostics")
-            Text(
-                text = "Read-only IEX quote ticks. Per-symbol bid/ask + millisecond " +
-                    "latency. No orders. No trading API.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            LabeledRow("Total quotes", snapshot.totalQuotes.toString())
-            LabeledRow("Total bars", snapshot.totalBars.toString())
-            LabeledRow("Buffer size", snapshot.bufferSize.toString())
-            LabeledRow("Dropped (overflow)", snapshot.droppedOverflow.toString())
-            if (snapshot.lastParserError != null) {
-                Text(
-                    text = "Parser: ${snapshot.lastParserError}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            // Header row for the compact table.
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "Sym  Bid    Ask    Spr   Lat   Δmsg  Q",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = "Tick / quote diagnostics",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                VelaStatusPill(
+                    label = "IEX · READ ONLY",
+                    tone = VelaPillTone.Safe,
                 )
             }
-            if (snapshot.perSymbol.isEmpty()) {
+            Text(
+                text = "Cotizaciones IEX de solo lectura, separadas por precio, " +
+                    "actividad y salud del buffer. Sin ordenes ni API de trading.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text("Resumen del flujo", style = MaterialTheme.typography.titleSmall)
+            TickSummaryGrid(snapshot)
+            Text(
+                text = "El buffer conserva las muestras más recientes. Los ticks " +
+                    "antiguos rotados no representan errores de red.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (snapshot.lastParserError != null) {
                 Text(
-                    text = "No ticks yet.",
+                    text = "Error de parser: ${snapshot.lastParserError}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                VelaStatusPill(
+                    label = "Parser OK",
+                    tone = VelaPillTone.Safe,
+                )
+            }
+            Text("Cotización por símbolo", style = MaterialTheme.typography.titleSmall)
+            if (snapshot.perSymbol.isEmpty()) {
+                VelaEmptyState(
+                    title = "Sin cotizaciones todavía",
+                    message = "Cuando llegue el primer tick IEX, sus métricas aparecerán aquí.",
                 )
             } else {
                 val sorted = snapshot.perSymbol.toSortedMap()
                 for ((sym, stats) in sorted) {
-                    Text(
-                        text = "%-5s %s %s %s %s %s %d".format(
-                            sym,
-                            formatPrice(stats.lastBid),
-                            formatPrice(stats.lastAsk),
-                            formatPrice(stats.spread),
-                            stats.lastLatencyMillis.toString() + "ms",
-                            stats.lastInterMessageMillis?.let { "${it}ms" } ?: "—",
-                            stats.quotesReceived,
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
+                    TickSymbolDiagnosticsCard(
+                        symbol = sym,
+                        stats = stats,
                     )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun TickSummaryGrid(snapshot: TickBufferSnapshot) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        VelaMetricCard(
+            label = "Cotizaciones",
+            value = formatCount(snapshot.totalQuotes),
+            modifier = Modifier.weight(1f),
+            tone = VelaPillTone.Safe,
+        )
+        VelaMetricCard(
+            label = "Barras",
+            value = formatCount(snapshot.totalBars),
+            modifier = Modifier.weight(1f),
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        VelaMetricCard(
+            label = "Ticks en memoria",
+            value = formatCount(snapshot.bufferSize),
+            modifier = Modifier.weight(1f),
+        )
+        VelaMetricCard(
+            label = "Historial rotado",
+            value = formatCount(snapshot.droppedOverflow),
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun TickSymbolDiagnosticsCard(
+    symbol: String,
+    stats: PerSymbolTickStats,
+) {
+    val hasQuote = stats.quotesReceived > 0 && stats.lastReceivedAtMillis > 0L
+    val bid = stats.lastBid.takeIf { hasQuote && it > 0.0 }
+    val ask = stats.lastAsk.takeIf { hasQuote && it > 0.0 }
+    val midpoint = if (bid != null && ask != null) (bid + ask) / 2.0 else null
+    val spread = stats.spread.takeIf { hasQuote }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = symbol,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                VelaStatusPill(
+                    label = "Cotizaciones ${formatCount(stats.quotesReceived)}",
+                    tone = VelaPillTone.Safe,
+                )
+            }
+            TickMetricPair(
+                firstLabel = "Bid",
+                firstValue = formatPrice(bid),
+                secondLabel = "Ask",
+                secondValue = formatPrice(ask),
+                firstTone = VelaPillTone.Safe,
+                secondTone = VelaPillTone.Safe,
+            )
+            TickMetricPair(
+                firstLabel = "Punto medio",
+                firstValue = formatPrice(midpoint),
+                secondLabel = "Spread",
+                secondValue = formatPrice(spread),
+                firstTone = VelaPillTone.Safe,
+            )
+            DiagnosticDetailRow(
+                label = "Latencia mercado a dispositivo",
+                value = if (hasQuote) "${stats.lastLatencyMillis} ms" else "—",
+            )
+            DiagnosticDetailRow(
+                label = "Intervalo entre mensajes",
+                value = stats.lastInterMessageMillis?.let { "$it ms" } ?: "—",
+            )
+            DiagnosticDetailRow(
+                label = "Timestamp de mercado",
+                value = formatEpochMillis(stats.lastQuoteTimestampMillis.takeIf { it > 0L }),
+            )
+            DiagnosticDetailRow(
+                label = "Recibida por VELA",
+                value = formatEpochMillis(stats.lastReceivedAtMillis.takeIf { it > 0L }),
+            )
+            DiagnosticDetailRow(
+                label = "Barras recibidas",
+                value = formatCount(stats.barsReceived),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TickMetricPair(
+    firstLabel: String,
+    firstValue: String,
+    secondLabel: String,
+    secondValue: String,
+    firstTone: VelaPillTone = VelaPillTone.Neutral,
+    secondTone: VelaPillTone = VelaPillTone.Neutral,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        VelaMetricCard(
+            label = firstLabel,
+            value = firstValue,
+            modifier = Modifier.weight(1f),
+            tone = firstTone,
+        )
+        VelaMetricCard(
+            label = secondLabel,
+            value = secondValue,
+            modifier = Modifier.weight(1f),
+            tone = secondTone,
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticDetailRow(label: String, value: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+private fun formatCount(value: Int): String = String.format(Locale.ROOT, "%,d", value)
 
 @Composable
 private fun SectionTitle(text: String) {
