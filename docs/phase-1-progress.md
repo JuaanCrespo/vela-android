@@ -9840,3 +9840,42 @@ Final static safety scan before commit:
 | Phase 2.w started | **NO** |
 
 The audit stops here. The pre-audit environment may have contained an older installed APK, but the preserved APK, Build A, Build B and the final APK were not installed or launched during this audit, and no Paper runtime chain was started.
+
+## VELA_Runtime_API34 clean recreation after persistent clock instability
+
+Date: 2026-08-07
+
+**Verdict: RUNTIME_AVD_RECREATED_AND_STABLE.**
+
+The previous `VELA_Runtime_API34` was deleted with `avdmanager` and recreated from the preserved `system-images\android-34\google_apis\x86_64\` image. `VELA_Lite` remained present and its pointer/config SHA-256 values were unchanged. No userdata, snapshot, credentials, internal Keystore, SDK component or system image was copied or deleted.
+
+Final AVD configuration:
+
+- profile/tag/ABI: `pixel_5` / `google_apis` / `x86_64`;
+- CPU/RAM: `2` cores / `2048M`;
+- Play Store: `no`;
+- cold boot forced; Fast Boot and snapshot load/save disabled.
+
+Clock evidence across two independent cold boots:
+
+| Measurement | Host UTC | Emulator UTC | Skew | Result |
+| --- | --- | --- | --- | --- |
+| M1 | `2026-08-07T12:36:10Z` | `2026-08-07T12:36:10Z` | `0 s` | PASS, exit 0 |
+| M2 | `2026-08-07T12:36:51Z` | `2026-08-07T12:36:50Z` | `-1 s` | PASS, exit 0 |
+| M3 | `2026-08-07T12:37:31Z` | `2026-08-07T12:37:30Z` | `-1 s` | PASS, exit 0 |
+| M4 | `2026-08-07T12:43:49Z` | `2026-08-07T12:43:48Z` | `-1 s` | PASS, exit 0 |
+| M5 | `2026-08-07T12:44:28Z` | `2026-08-07T12:44:28Z` | `0 s` | PASS, exit 0 |
+| M6 | `2026-08-07T12:45:09Z` | `2026-08-07T12:45:09Z` | `0 s` | PASS, exit 0 |
+
+Both boots reached `sys.boot_completed=1` and `auto_time/auto_time_zone=1/1`; the first used a 90-second settle and the second a 60-second settle. No Windows Time change, `adb shell date`, `adb root`, threshold relaxation or experimental clock configuration was used.
+
+Safe artifact validation:
+
+- safety scan: `11 / 0 / 0`;
+- `Verify-SafeApk.ps1`: `VERIFY_SAFE_APK_PASS`;
+- APK SHA-256: `E078C300DB5CB23ADF0089507CDC513E29457D1F6557A1FE966C272B6591650A`;
+- `local.properties` clean; `MANUAL_PAPER_SUBMIT_COMPILED=false`.
+
+The safe APK installed successfully. UX-2 and the dark cockpit rendered without a crash, with five destinations (`Inicio`, `Mercado`, `Velas`, `Paper`, `Más`), `Mode READ_ONLY`, `Paper-only=true`, `REAL locked=true`, `LIVE=false`, `Auto Paper=false`, manual submit compiled `false` and session `OFF`. `Credentials configured=false` was the expected clean-recreation state. VELA was force-stopped after validation.
+
+No account refresh, stream, preflight, draft, preview, readiness, arm, token, confirmation, POST, LIVE, REAL, Auto Paper, cancel, replace, close or Phase 2.w action occurred. POST count remains `0`; `G:\vela` and Windows `vela.db` were not touched. The procedure stops here pending manual credential entry and a separately authorized runtime precheck.
