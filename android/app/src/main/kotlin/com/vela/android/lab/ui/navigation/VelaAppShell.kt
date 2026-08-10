@@ -50,12 +50,12 @@ import com.vela.android.lab.ui.theme.VelaStatusPill
 internal object VelaBottomNavigationTokens {
     val HorizontalInset = 20.dp
     val BottomInset = 4.dp
-    val CornerRadius = 24.dp
+    val CornerRadius = 25.dp
     val ShadowElevation = 4.dp
     val BorderWidth = 1.dp
     val MaxWidth = 320.dp
     val IconSize = 17.dp
-    val NavigationBarHeight = 48.dp
+    val NavigationBarHeight = 50.dp
     val IndicatorAlpha = 0.24f
     val PillWidth = 44.dp
     val PillHeight = 24.dp
