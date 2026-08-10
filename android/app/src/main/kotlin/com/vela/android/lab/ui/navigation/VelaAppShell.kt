@@ -49,18 +49,18 @@ import com.vela.android.lab.ui.theme.VelaStatusPill
 
 internal object VelaBottomNavigationTokens {
     val HorizontalInset = 20.dp
-    val BottomInset = 8.dp
-    val CornerRadius = 20.dp
-    val ShadowElevation = 8.dp
+    val BottomInset = 4.dp
+    val CornerRadius = 24.dp
+    val ShadowElevation = 4.dp
     val BorderWidth = 1.dp
     val MaxWidth = 320.dp
-    val IconSize = 18.dp
-    val NavigationBarHeight = 56.dp
+    val IconSize = 17.dp
+    val NavigationBarHeight = 48.dp
     val IndicatorAlpha = 0.24f
-    val PillWidth = 48.dp
-    val PillHeight = 28.dp
-    val PillCornerRadius = 14.dp
-    val ItemLabelSpacing = 2.dp
+    val PillWidth = 44.dp
+    val PillHeight = 24.dp
+    val PillCornerRadius = 12.dp
+    val ItemLabelSpacing = 1.dp
 }
 
 internal fun VelaDestination.bottomNavigationIconRes(): Int = when (this) {
@@ -220,7 +220,7 @@ fun VelaBottomNavigation(
                 .fillMaxWidth(),
             shape = RoundedCornerShape(VelaBottomNavigationTokens.CornerRadius),
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 4.dp,
+            tonalElevation = 2.dp,
             shadowElevation = VelaBottomNavigationTokens.ShadowElevation,
             border = BorderStroke(
                 width = VelaBottomNavigationTokens.BorderWidth,

@@ -12,18 +12,18 @@ class VelaBottomNavigationStyleTest {
     @Test
     fun `bottom bar keeps the floating rounded geometry`() {
         assertEquals(20.dp, VelaBottomNavigationTokens.HorizontalInset)
-        assertEquals(8.dp, VelaBottomNavigationTokens.BottomInset)
-        assertEquals(20.dp, VelaBottomNavigationTokens.CornerRadius)
-        assertEquals(8.dp, VelaBottomNavigationTokens.ShadowElevation)
+        assertEquals(4.dp, VelaBottomNavigationTokens.BottomInset)
+        assertEquals(24.dp, VelaBottomNavigationTokens.CornerRadius)
+        assertEquals(4.dp, VelaBottomNavigationTokens.ShadowElevation)
         assertEquals(1.dp, VelaBottomNavigationTokens.BorderWidth)
         assertEquals(320.dp, VelaBottomNavigationTokens.MaxWidth)
-        assertEquals(18.dp, VelaBottomNavigationTokens.IconSize)
-        assertEquals(56.dp, VelaBottomNavigationTokens.NavigationBarHeight)
+        assertEquals(17.dp, VelaBottomNavigationTokens.IconSize)
+        assertEquals(48.dp, VelaBottomNavigationTokens.NavigationBarHeight)
         assertEquals(0.24f, VelaBottomNavigationTokens.IndicatorAlpha)
-        assertEquals(48.dp, VelaBottomNavigationTokens.PillWidth)
-        assertEquals(28.dp, VelaBottomNavigationTokens.PillHeight)
-        assertEquals(14.dp, VelaBottomNavigationTokens.PillCornerRadius)
-        assertEquals(2.dp, VelaBottomNavigationTokens.ItemLabelSpacing)
+        assertEquals(44.dp, VelaBottomNavigationTokens.PillWidth)
+        assertEquals(24.dp, VelaBottomNavigationTokens.PillHeight)
+        assertEquals(12.dp, VelaBottomNavigationTokens.PillCornerRadius)
+        assertEquals(1.dp, VelaBottomNavigationTokens.ItemLabelSpacing)
     }
 
     @Test
