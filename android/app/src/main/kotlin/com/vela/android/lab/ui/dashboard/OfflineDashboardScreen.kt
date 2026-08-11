@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -28,20 +29,38 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vela.android.lab.data.market.tick.PerSymbolTickStats
 import com.vela.android.lab.data.market.tick.TickBufferSnapshot
+import com.vela.android.lab.data.market.price.MarketPriceSource
+import com.vela.android.lab.data.market.price.PriceFreshness
 import com.vela.android.lab.data.paper.RiskFlag
 import com.vela.android.lab.data.paper.preflight.OrderSide
+import com.vela.android.lab.data.paper.preflight.PaperExecutionReadinessStatus
+import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreviewStatus
+import com.vela.android.lab.data.paper.preflight.PreflightStatus
 import com.vela.android.lab.data.paper.preflight.PaperTradingExecutionGuard
 import com.vela.android.lab.data.paper.submit.AlpacaPaperSubmitEndpoint
+import com.vela.android.lab.data.paper.submit.PaperOrderSubmitError
 import com.vela.android.lab.ui.candles.CandlesViewModel
 import com.vela.android.lab.ui.navigation.VelaDestination
 import com.vela.android.lab.ui.settings.VelaPreferencesViewModel
@@ -57,6 +76,7 @@ import com.vela.android.lab.ui.theme.VelaSafetyBanner
 import com.vela.android.lab.ui.theme.VelaSectionHeader
 import com.vela.android.lab.ui.theme.VelaStatusPill
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -192,14 +212,25 @@ fun OfflineDashboardScreen(
             preflightSymbolChanged = { paperOrderPreflightViewModel?.onSymbolInputChange(it) },
             preflightSideChanged = { paperOrderPreflightViewModel?.onSideChange(it) },
             preflightQuantityChanged = { paperOrderPreflightViewModel?.onQuantityInputChange(it) },
-            preflightRun = { paperOrderPreflightViewModel?.runDryRunPreflight() },
-            preflightBuildDraft = { paperOrderPreflightViewModel?.buildLocalDraft() },
-            preflightBuildPreview = { paperOrderPreflightViewModel?.buildPayloadPreview() },
-            readinessCheck = { paperOrderPreflightViewModel?.checkExecutionReadiness() },
-            disabledExecutionAttempt = { paperOrderPreflightViewModel?.attemptDisabledExecution() },
+            preflightPrepareGuided = {
+                if (paperManualSubmitViewModel?.uiState?.value?.sessionArmed != true) {
+                    paperOrderPreflightViewModel?.prepareGuidedLocalChain()
+                }
+            },
             dryRunAuditRefresh = { paperOrderDryRunAuditViewModel?.refresh() },
             previewQueueRefresh = { paperOrderPayloadPreviewQueueViewModel?.refresh() },
-            manualPaperArm = { paperManualSubmitViewModel?.armSession() },
+            manualPaperArm = {
+                val preflight = paperOrderPreflightViewModel?.uiState?.value
+                val manual = paperManualSubmitViewModel?.uiState?.value
+                val canArm = listOf(
+                    preparedPreviewIsSynchronized(preflight, manual),
+                    manual?.compileTimeEnabled == true,
+                    manual?.sessionArmed == false,
+                ).all { it }
+                if (canArm) {
+                    paperManualSubmitViewModel?.armSession()
+                }
+            },
             manualPaperDisarm = { paperManualSubmitViewModel?.disarmSession() },
             manualPaperRefresh = { paperManualSubmitViewModel?.refreshSubmitReadiness() },
             manualPaperWarningChanged = { paperManualSubmitViewModel?.onWarningAcceptedChange(it) },
@@ -424,9 +455,12 @@ fun OfflineDashboardContent(
                 ) {
                     PaperManualSubmitCard(
                         state = manualSubmitState,
+                        preparationReady = preparedPreviewIsSynchronized(
+                            preflightState,
+                            manualSubmitState,
+                        ),
                         onArm = onManualSubmitArm,
                         onDisarm = onManualSubmitDisarm,
-                        onRefresh = onManualSubmitRefresh,
                         onWarningAccepted = onManualSubmitWarningAccepted,
                         onConfirmationChange = onManualSubmitConfirmationChange,
                         onSubmit = onManualSubmitOnce,
@@ -459,13 +493,14 @@ fun OfflineDashboardContent(
 @Composable
 internal fun PaperManualSubmitCard(
     state: PaperManualSubmitUiState,
+    preparationReady: Boolean,
     onArm: () -> Unit,
     onDisarm: () -> Unit,
-    onRefresh: () -> Unit,
     onWarningAccepted: (Boolean) -> Unit,
     onConfirmationChange: (String) -> Unit,
     onSubmit: () -> Unit,
 ) {
+    var technicalDetailsExpanded by rememberSaveable { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             SectionTitle("Manual Paper submit — one-shot")
@@ -475,6 +510,57 @@ internal fun PaperManualSubmitCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(8.dp))
+            LabeledRow(
+                "Orden",
+                listOfNotNull(
+                    state.symbol,
+                    state.side,
+                    state.quantity?.toString(),
+                    state.orderType,
+                    state.timeInForce,
+                ).joinToString(" · ").ifBlank { "—" },
+            )
+            LabeledRow("Preparación local", if (preparationReady) "READY" else "NOT_READY")
+            if (state.sessionArmed) {
+                LabeledRow(
+                    "Gate final",
+                    "${state.finalPriceGateResult} · " +
+                        if (state.gateAllowed) "SUBMIT ALLOWED" else "SUBMIT BLOCKED",
+                )
+                LabeledRow(
+                    "Precio / edad",
+                    "${state.finalPriceSource ?: "—"} · ${state.finalPriceFreshness ?: "—"} · " +
+                        "${state.finalPriceAgeMillis ?: "—"}/${state.finalPriceRawAgeMillis ?: "—"} ms",
+                )
+                LabeledRow("Drift", formatPercent(state.finalPriceDriftPercent))
+                if (state.gateReasons.isNotEmpty()) {
+                    Text(
+                        text = "Gate reasons: ${state.gateReasons.joinToString { it.name }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            PaperManualSubmitControls(
+                state = state,
+                preparationReady = preparationReady,
+                onArm = onArm,
+                onDisarm = onDisarm,
+                onWarningAccepted = onWarningAccepted,
+                onConfirmationChange = onConfirmationChange,
+                onSubmit = onSubmit,
+            )
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { technicalDetailsExpanded = !technicalDetailsExpanded },
+            ) {
+                Text(
+                    if (technicalDetailsExpanded) "Ocultar detalles técnicos"
+                    else "Mostrar detalles técnicos",
+                )
+            }
+            if (technicalDetailsExpanded) {
             LabeledRow("Manual Paper submit compiled", state.compileTimeEnabled.toString())
             LabeledRow("Manual Paper submit session", if (state.sessionArmed) "ON" else "OFF")
             LabeledRow("Paper-only", state.paperOnly.toString())
@@ -517,78 +603,6 @@ internal fun PaperManualSubmitCard(
             LabeledRow("Submit gate", if (state.gateAllowed) "ALLOWED_ONCE" else "BLOCKED")
             LabeledRow("Submit method", AlpacaPaperSubmitEndpoint.METHOD)
             LabeledRow("Submit endpoint", AlpacaPaperSubmitEndpoint.ORDERS_URL)
-
-            if (!state.compileTimeEnabled) {
-                Text(
-                    text = "Manual Paper submit is OFF for this build. Set the approved debug-only local flag and rebuild to make session arming available.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            if (state.gateReasons.isNotEmpty()) {
-                Text(
-                    text = "Gate reasons: ${state.gateReasons.joinToString { it.name }}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            if (!state.sessionArmed) {
-                OutlinedButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onArm,
-                    enabled = state.compileTimeEnabled && state.previewId != null,
-                ) {
-                    Text("Arm manual Paper submit for this session")
-                }
-            } else {
-                OutlinedButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onDisarm,
-                    enabled = !state.isSubmitting,
-                ) {
-                    Text("Disarm manual Paper submit")
-                }
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onRefresh,
-                    enabled = !state.isRefreshing && !state.isSubmitting,
-                ) {
-                    Text(if (state.isRefreshing) "Refreshing submit gates…" else "Refresh submit gates")
-                }
-                if (state.preflightStatus == "WARNING_ONLY") {
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { onWarningAccepted(!state.warningAccepted) },
-                        enabled = !state.isSubmitting,
-                    ) {
-                        Text(
-                            if (state.warningAccepted) "Warnings acknowledged"
-                            else "Acknowledge all current warnings",
-                        )
-                    }
-                }
-                Text(
-                    text = "Required confirmation: ${state.requiredConfirmationText}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                OutlinedTextField(
-                    value = state.confirmationInput,
-                    onValueChange = onConfirmationChange,
-                    label = { Text("Type exact one-shot confirmation") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.isSubmitting,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onSubmit,
-                    enabled = state.gateAllowed && !state.isSubmitting,
-                ) {
-                    Text(if (state.isSubmitting) "Submitting one Paper order…" else "Submit Paper order once")
-                }
             }
             state.lastResult?.let { result ->
                 Spacer(modifier = Modifier.height(8.dp))
@@ -605,6 +619,150 @@ internal fun PaperManualSubmitCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PaperManualSubmitControls(
+    state: PaperManualSubmitUiState,
+    preparationReady: Boolean,
+    onArm: () -> Unit,
+    onDisarm: () -> Unit,
+    onWarningAccepted: (Boolean) -> Unit,
+    onConfirmationChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val confirmationExpiresAt = state.confirmationExpiresAtEpochMillis
+    var uiNowEpochMillis by remember(confirmationExpiresAt) {
+        mutableStateOf(System.currentTimeMillis())
+    }
+    LaunchedEffect(confirmationExpiresAt) {
+        val expiresAt = confirmationExpiresAt ?: return@LaunchedEffect
+        while (true) {
+            val now = System.currentTimeMillis()
+            uiNowEpochMillis = now
+            if (now > expiresAt) break
+            delay(minOf(250L, (expiresAt - now + 1L).coerceAtLeast(1L)))
+        }
+    }
+    if (!state.compileTimeEnabled) {
+        Text(
+            text = "La capacidad manual Paper está desactivada en este build.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (!state.sessionArmed) {
+        if (state.lastResult != null) {
+            Text(
+                "Intento finalizado. No se puede volver a armar esta preview.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return
+        }
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onArm,
+            enabled = listOf(
+                state.compileTimeEnabled,
+                state.previewId != null,
+                preparationReady,
+            ).all { it },
+        ) {
+            Text("Armar sesión Paper manual")
+        }
+        if (!preparationReady) {
+            Text(
+                "Primero completá Preparar orden Paper.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+
+    OutlinedButton(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onDisarm,
+        enabled = !state.isSubmitting,
+    ) {
+        Text("Abortar y desarmar")
+    }
+    val confirmationGate = paperManualConfirmationUiGate(
+        state = state,
+        nowEpochMillis = uiNowEpochMillis,
+    )
+    if (state.isRefreshing) {
+        Text("Validando gates… No escribas todavía.")
+        return
+    }
+    val confirmationExpired = confirmationExpiresAt != null &&
+        uiNowEpochMillis > confirmationExpiresAt
+    if (confirmationExpired) {
+        Text(
+            "La confirmación venció. No envíes; abortá y desarmá.",
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
+    if (!confirmationGate.mayType && !confirmationGate.maySubmit) {
+        Text(
+            "Hay un bloqueo inesperado. No escribas ni envíes; abortá y desarmá.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
+    Text(
+        text = "Escribí exactamente: ${state.requiredConfirmationText}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+    )
+    OutlinedTextField(
+        value = state.confirmationInput,
+        onValueChange = onConfirmationChange,
+        label = { Text("Confirmación manual exacta") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = confirmationGate.mayType,
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Characters,
+            autoCorrect = false,
+            keyboardType = KeyboardType.Ascii,
+            imeAction = ImeAction.Done,
+        ),
+        keyboardActions = KeyboardActions(
+            onDone = {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+            },
+        ),
+    )
+    if (confirmationGate.maySubmit && confirmationExpiresAt != null) {
+        val secondsRemaining =
+            ((confirmationExpiresAt - uiNowEpochMillis).coerceAtLeast(0L) + 999L) / 1_000L
+        Text(
+            "Confirmación válida: $secondsRemaining s. Tocá Submit ahora.",
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    Button(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onSubmit,
+        enabled = confirmationGate.maySubmit,
+    ) {
+        Text(
+            if (state.isSubmitting) "Submitting one Paper order…"
+            else "Submit Paper order once",
+        )
     }
 }
 
@@ -1188,6 +1346,278 @@ internal fun PaperDryRunAuditCard(
             }
         }
     }
+}
+
+@Composable
+internal fun PaperOrderPreparationCard(
+    state: PaperOrderPreflightUiState,
+    manualSessionArmed: Boolean,
+    onSymbolChange: (String) -> Unit,
+    onSideChange: (OrderSide) -> Unit,
+    onQuantityChange: (String) -> Unit,
+    onPrepare: () -> Unit,
+) {
+    val stage = state.guidedPreparationStage
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val inputsEnabled = !state.isGuidedPreparationRunning && !manualSessionArmed &&
+        stage != PaperGuidedPreparationStage.READY
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            SectionTitle("Preparar orden Paper")
+            Text(
+                text = "Un toque verifica cuenta y precio, prepara el resumen y controla " +
+                    "la seguridad. No arma ni envía ninguna orden.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.symbolInput,
+                onValueChange = onSymbolChange,
+                label = { Text("Símbolo") },
+                singleLine = true,
+                enabled = inputsEnabled,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { onSideChange(OrderSide.BUY) },
+                    enabled = inputsEnabled && state.side != OrderSide.BUY,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics {
+                            selected = state.side == OrderSide.BUY
+                            role = Role.RadioButton
+                        },
+                ) { Text("BUY") }
+                OutlinedButton(
+                    onClick = { onSideChange(OrderSide.SELL) },
+                    enabled = inputsEnabled && state.side != OrderSide.SELL,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics {
+                            selected = state.side == OrderSide.SELL
+                            role = Role.RadioButton
+                        },
+                ) { Text("SELL") }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.quantityInput,
+                onValueChange = onQuantityChange,
+                label = { Text("Cantidad") },
+                singleLine = true,
+                enabled = inputsEnabled,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            LabeledRow(
+                "Orden",
+                "${state.symbolInput.ifBlank { "—" }} · ${state.side.name} · " +
+                    "${state.quantityInput.ifBlank { "—" }} · MARKET · DAY",
+            )
+            val stageLabel = guidedPreparationLabel(stage)
+            LabeledRow(
+                "Estado",
+                stageLabel,
+                modifier = Modifier.semantics {
+                    liveRegion = if (stage == PaperGuidedPreparationStage.BLOCKED) {
+                        LiveRegionMode.Assertive
+                    } else {
+                        LiveRegionMode.Polite
+                    }
+                    stateDescription = stageLabel
+                },
+            )
+            PaperPreparationReadOnlySummary(state)
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    onPrepare()
+                },
+                enabled = !manualSessionArmed &&
+                    stage in setOf(
+                        PaperGuidedPreparationStage.IDLE,
+                        PaperGuidedPreparationStage.BLOCKED,
+                    ),
+            ) {
+                Text(
+                    if (state.isGuidedPreparationRunning) "Preparando…"
+                    else if (stage == PaperGuidedPreparationStage.READY) "Preparación lista"
+                    else if (stage == PaperGuidedPreparationStage.BLOCKED) "Reintentar preparación"
+                    else "Preparar orden Paper",
+                )
+            }
+            if (stage == PaperGuidedPreparationStage.READY) {
+                Text(
+                    "LISTO. Revisá el resumen y armá la sesión manualmente.",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            state.guidedPreparationError?.let {
+                Text(
+                    it,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (manualSessionArmed) {
+                Text("Desarmá la sesión antes de preparar otra orden.")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaperPreparationReadOnlySummary(state: PaperOrderPreflightUiState) {
+    val result = state.lastResult ?: return
+    val verification = when (result.status) {
+        PreflightStatus.ALLOWED_DRY_RUN -> "APROBADA"
+        PreflightStatus.WARNING_ONLY -> "CON ADVERTENCIAS"
+        PreflightStatus.BLOCKED -> "BLOQUEADA"
+    }
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(
+        text = "Resultado automático · solo lectura",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    LabeledRow("Verificación", verification)
+    LabeledRow(
+        "Mercado",
+        when (result.marketOpen) {
+            true -> "ABIERTO"
+            false -> "CERRADO"
+            null -> "N/D"
+        },
+    )
+    LabeledRow(
+        "Precio",
+        "${result.priceSource ?: "—"} · ${result.priceFreshness ?: "—"} · " +
+            "${result.priceAgeMillis ?: "—"} ms",
+    )
+    state.lastDraft?.let { LabeledRow("Borrador", it.status.name) }
+    state.lastPayloadPreview?.let { LabeledRow("Resumen", it.status.name) }
+    state.lastExecutionReadiness?.let { readiness ->
+        LabeledRow(
+            "Seguridad",
+            if (readiness.status == PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED) {
+                "LISTA · ENVÍO DESACTIVADO"
+            } else {
+                readiness.status.name
+            },
+        )
+    }
+    if (result.blockReasons.isNotEmpty()) {
+        Text(
+            "Bloqueos: ${result.blockReasons.joinToString { it.message }}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (result.warnings.isNotEmpty()) {
+        Text(
+            "Advertencias: ${result.warnings.joinToString { it.message }}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun guidedPreparationLabel(stage: PaperGuidedPreparationStage): String = when (stage) {
+    PaperGuidedPreparationStage.IDLE -> "Sin iniciar"
+    PaperGuidedPreparationStage.PREFLIGHT -> "1/4 · Preflight"
+    PaperGuidedPreparationStage.DRAFT -> "2/4 · Draft local"
+    PaperGuidedPreparationStage.PREVIEW -> "3/4 · Creando y guardando preview…"
+    PaperGuidedPreparationStage.READINESS -> "4/4 · Readiness"
+    PaperGuidedPreparationStage.READY -> "LISTO · Arm sigue siendo manual"
+    PaperGuidedPreparationStage.BLOCKED -> "DETENIDO"
+}
+
+internal fun preparedPreviewIsSynchronized(
+    preflight: PaperOrderPreflightUiState?,
+    manual: PaperManualSubmitUiState?,
+): Boolean {
+    val result = preflight?.lastResult
+    val preview = preflight?.lastPayloadPreview
+    val readiness = preflight?.lastExecutionReadiness
+    return listOf(
+        preflight != null,
+        manual != null,
+        preview != null,
+        readiness != null,
+        preflight?.guidedPreparationStage == PaperGuidedPreparationStage.READY,
+        result?.status == PreflightStatus.ALLOWED_DRY_RUN,
+        result?.marketOpen == true,
+        result?.priceSource == MarketPriceSource.LIVE_QUOTE_MID.name,
+        result?.priceFreshness == PriceFreshness.FRESH.name,
+        result?.blockReasons?.isEmpty() == true,
+        result?.warnings?.isEmpty() == true,
+        preview?.status == PaperOrderPayloadPreviewStatus.READY_PREVIEW,
+        preflight?.lastPayloadPreviewError == null,
+        preflight?.lastExecutionReadinessError == null,
+        readiness?.status == PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED,
+        readiness?.previewId == preview?.previewId,
+        readiness?.linkedClientDryRunId == preview?.linkedClientDryRunId,
+        manual?.previewId == preview?.previewId,
+        manual?.preflightStatus == PreflightStatus.ALLOWED_DRY_RUN.name,
+        manual?.readinessStatus ==
+            PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED.name,
+        manual?.lastResult == null,
+    ).all { it }
+}
+
+internal data class PaperManualConfirmationUiGate(
+    val mayType: Boolean,
+    val maySubmit: Boolean,
+)
+
+private const val MANUAL_CONFIRMATION_RAW_AGE_ABORT_THRESHOLD_MILLIS: Long = -1_500L
+
+internal fun paperManualConfirmationUiGate(
+    state: PaperManualSubmitUiState,
+    nowEpochMillis: Long = System.currentTimeMillis(),
+): PaperManualConfirmationUiGate {
+    val expectedBeforeTyping = setOf(
+        PaperOrderSubmitError.PREVIEW_MISMATCH,
+        PaperOrderSubmitError.CONFIRMATION_MISSING,
+    )
+    return PaperManualConfirmationUiGate(
+        mayType = listOf(
+            state.finalPriceGateResult == "ALLOWED",
+            state.finalPriceRawAgeMillis?.let {
+                it > MANUAL_CONFIRMATION_RAW_AGE_ABORT_THRESHOLD_MILLIS
+            } == true,
+            state.gateReasons.toSet() == expectedBeforeTyping,
+            state.lastResult == null,
+            !state.isRefreshing,
+            !state.isSubmitting,
+        ).all { it },
+        maySubmit = listOf(
+            state.finalPriceGateResult == "ALLOWED",
+            state.finalPriceRawAgeMillis?.let {
+                it > MANUAL_CONFIRMATION_RAW_AGE_ABORT_THRESHOLD_MILLIS
+            } == true,
+            state.gateAllowed,
+            state.gateReasons.isEmpty(),
+            state.confirmationInput == state.requiredConfirmationText,
+            state.confirmationExpiresAtEpochMillis?.let { nowEpochMillis <= it } == true,
+            state.lastResult == null,
+            !state.isRefreshing,
+            !state.isSubmitting,
+        ).all { it },
+    )
 }
 
 @Composable
@@ -1857,9 +2287,13 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun LabeledRow(label: String, value: String) {
+private fun LabeledRow(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,

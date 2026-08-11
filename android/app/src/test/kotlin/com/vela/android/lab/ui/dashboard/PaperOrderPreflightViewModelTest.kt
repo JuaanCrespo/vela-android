@@ -5,6 +5,9 @@ package com.vela.android.lab.ui.dashboard
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentials
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentialsProvider
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsStore
+import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
+import com.vela.android.lab.data.market.tick.MarketTick
+import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import com.vela.android.lab.data.paper.AlpacaHttpClient
 import com.vela.android.lab.data.paper.AlpacaPaperReadOnlyClient
 import com.vela.android.lab.data.paper.AlpacaPaperTradingEndpoint
@@ -13,24 +16,33 @@ import com.vela.android.lab.data.paper.preflight.OrderSide
 import com.vela.android.lab.data.paper.preflight.DisabledExecutionStatus
 import com.vela.android.lab.data.paper.preflight.PaperExecutionReadinessStatus
 import com.vela.android.lab.data.paper.preflight.PaperOrderPreflightEngine
+import com.vela.android.lab.data.paper.preflight.PaperOrderDryRunAuditRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreviewRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreviewStatus
 import com.vela.android.lab.data.paper.preflight.PaperOrderRequestDraftStatus
 import com.vela.android.lab.data.paper.preflight.PreviewQueueFakeDao
 import com.vela.android.lab.data.paper.preflight.PreflightBlockReason
 import com.vela.android.lab.data.paper.preflight.PreflightStatus
+import com.vela.android.lab.data.paper.submit.PaperOrderSubmitError
 import com.vela.android.lab.data.repository.MarketDataRepository
 import com.vela.android.lab.data.repository.SignalRepository
 import com.vela.android.lab.data.watchlist.InMemoryWatchlistStore
 import com.vela.android.lab.data.watchlist.WatchlistRepository
+import com.vela.android.lab.db.room.dao.PaperOrderPayloadPreviewDao
+import com.vela.android.lab.db.room.dao.PaperOrderDryRunAuditDao
 import com.vela.android.lab.db.room.dao.MarketBarDao
 import com.vela.android.lab.db.room.dao.SignalDao
 import com.vela.android.lab.db.room.entities.MarketBar1mEntity
+import com.vela.android.lab.db.room.entities.PaperOrderPayloadPreviewEntity
+import com.vela.android.lab.db.room.entities.PaperOrderDryRunAuditEntity
 import com.vela.android.lab.db.room.entities.SymbolSignalEntity
 import com.vela.android.lab.state.AppState
+import java.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -80,24 +92,50 @@ class PaperOrderPreflightViewModelTest {
                 )
             }
         },
-        previewDao: PreviewQueueFakeDao? = null,
+        previewDao: PaperOrderPayloadPreviewDao? = null,
+        auditDao: PaperOrderDryRunAuditDao? = PreflightFakeAuditDao(),
+        includeLiveQuote: Boolean = true,
+        liveQuoteAgeMillis: Long = 500L,
         onPayloadPreviewSaved: suspend () -> Unit = {},
     ): PaperOrderPreflightViewModel {
+        val nowMillis = 100_000L
         val httpClient = PreflightTrackingHttpClient(responses)
         val client = AlpacaPaperReadOnlyClient(
             credentialsProvider = AlpacaCredentialsProvider { store.load() },
             httpClient = httpClient,
         )
+        val marketDataRepository = MarketDataRepository(marketDao)
+        val tickBuffer = MarketTickBuffer()
+        if (includeLiveQuote) {
+            val receivedAt = nowMillis - liveQuoteAgeMillis
+            tickBuffer.pushQuote(
+                MarketTick(
+                    symbol = "SPY",
+                    bidPrice = 519.90,
+                    askPrice = 520.10,
+                    marketTimestampMillis = receivedAt - 100L,
+                    receivedAtMillis = receivedAt,
+                    source = "alpaca-iex-stream",
+                ),
+            )
+        }
         return PaperOrderPreflightViewModel(
             engine = PaperOrderPreflightEngine(),
             client = client,
             credentialsStore = store,
             watchlistRepository = WatchlistRepository(InMemoryWatchlistStore(watchlist)),
-            marketDataRepository = MarketDataRepository(marketDao),
+            marketDataRepository = marketDataRepository,
             signalRepository = SignalRepository(signalDao),
             appState = AppState(),
+            auditRepository = auditDao?.let(::PaperOrderDryRunAuditRepository),
+            priceSnapshotProvider = MarketPriceSnapshotProvider(
+                tickBuffer = tickBuffer,
+                marketDataRepository = marketDataRepository,
+                clock = { Instant.ofEpochMilli(nowMillis) },
+            ),
             payloadPreviewRepository = previewDao?.let(::PaperOrderPayloadPreviewRepository),
             onPayloadPreviewSaved = onPayloadPreviewSaved,
+            clock = { Instant.ofEpochMilli(nowMillis) },
         )
     }
 
@@ -106,10 +144,13 @@ class PaperOrderPreflightViewModelTest {
         buyingPower: Double = 200_000.0,
         portfolioValue: Double = 100_000.0,
         marketOpen: Boolean = true,
+        accountStatus: String = "ACTIVE",
+        tradingBlocked: Boolean = false,
+        accountBlocked: Boolean = false,
         positionsJson: String = "[]",
     ): Map<String, String> = mapOf(
         AlpacaPaperTradingEndpoint.ACCOUNT_URL to
-            """{"status":"ACTIVE","equity":"$equity","cash":"50000","buying_power":"$buyingPower","portfolio_value":"$portfolioValue"}""",
+            """{"status":"$accountStatus","equity":"$equity","cash":"50000","buying_power":"$buyingPower","portfolio_value":"$portfolioValue","trading_blocked":$tradingBlocked,"account_blocked":$accountBlocked}""",
         AlpacaPaperTradingEndpoint.CLOCK_URL to """{"is_open":$marketOpen}""",
         AlpacaPaperTradingEndpoint.POSITIONS_URL to positionsJson,
     )
@@ -351,6 +392,269 @@ class PaperOrderPreflightViewModelTest {
         }
 
     @Test
+    fun `guided preparation reaches safe disabled readiness in one action`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val dao = PreviewQueueFakeDao()
+            val auditDao = PreflightFakeAuditDao()
+            val vm = newVm(okResponses(), previewDao = dao, auditDao = auditDao)
+            vm.onSymbolInputChange("SPY")
+            vm.onSideChange(OrderSide.BUY)
+            vm.onQuantityInputChange("1")
+
+            vm.prepareGuidedLocalChain()
+
+            val state = vm.uiState.value
+            assertEquals(PaperGuidedPreparationStage.READY, state.guidedPreparationStage)
+            assertFalse(state.isGuidedPreparationRunning)
+            assertNull(state.guidedPreparationError)
+            assertEquals(PreflightStatus.ALLOWED_DRY_RUN, state.lastResult?.status)
+            assertEquals(PaperOrderRequestDraftStatus.READY_LOCAL, state.lastDraft?.status)
+            assertEquals(PaperOrderPayloadPreviewStatus.READY_PREVIEW, state.lastPayloadPreview?.status)
+            assertEquals(
+                PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED,
+                state.lastExecutionReadiness?.status,
+            )
+            assertFalse(state.lastExecutionReadiness!!.executionEnabled)
+            assertEquals(1, dao.rows.size)
+            assertEquals(1, auditDao.rows.size)
+        }
+
+    @Test
+    fun `guided preparation stops before draft when preflight is blocked`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val dao = PreviewQueueFakeDao()
+            val vm = newVm(okResponses(buyingPower = 100.0), previewDao = dao)
+            vm.onSymbolInputChange("SPY")
+            vm.onQuantityInputChange("10")
+
+            vm.prepareGuidedLocalChain()
+
+            val state = vm.uiState.value
+            assertEquals(PaperGuidedPreparationStage.BLOCKED, state.guidedPreparationStage)
+            assertNotNull(state.guidedPreparationError)
+            assertEquals(PreflightStatus.BLOCKED, state.lastResult?.status)
+            assertNull(state.lastDraft)
+            assertNull(state.lastPayloadPreview)
+            assertNull(state.lastExecutionReadiness)
+            assertTrue(dao.rows.isEmpty())
+        }
+
+    @Test
+    fun `guided preparation requires every Paper GET to succeed`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val requiredUrls = listOf(
+                AlpacaPaperTradingEndpoint.ACCOUNT_URL,
+                AlpacaPaperTradingEndpoint.CLOCK_URL,
+                AlpacaPaperTradingEndpoint.POSITIONS_URL,
+            )
+            requiredUrls.forEach { missingUrl ->
+                val dao = PreviewQueueFakeDao()
+                val vm = newVm(okResponses() - missingUrl, previewDao = dao)
+                vm.onSymbolInputChange("SPY")
+                vm.onQuantityInputChange("1")
+
+                vm.prepareGuidedLocalChain()
+
+                assertEquals(
+                    PaperGuidedPreparationStage.BLOCKED,
+                    vm.uiState.value.guidedPreparationStage,
+                    "Missing GET must block: $missingUrl",
+                )
+                assertNull(vm.uiState.value.lastDraft)
+                assertNull(vm.uiState.value.lastPayloadPreview)
+                assertNull(vm.uiState.value.lastExecutionReadiness)
+                assertTrue(dao.rows.isEmpty())
+            }
+        }
+
+    @Test
+    fun `guided preparation requires market open`() = runTest(UnconfinedTestDispatcher()) {
+        val dao = PreviewQueueFakeDao()
+        val vm = newVm(okResponses(marketOpen = false), previewDao = dao)
+        vm.onSymbolInputChange("SPY")
+        vm.onQuantityInputChange("1")
+
+        vm.prepareGuidedLocalChain()
+
+        assertEquals(PaperGuidedPreparationStage.BLOCKED, vm.uiState.value.guidedPreparationStage)
+        assertNull(vm.uiState.value.lastDraft)
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    @Test
+    fun `guided preparation requires an active unblocked account`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val unsafeAccounts = listOf(
+                okResponses(accountStatus = "INACTIVE"),
+                okResponses(tradingBlocked = true),
+                okResponses(accountBlocked = true),
+            )
+            unsafeAccounts.forEach { responses ->
+                val dao = PreviewQueueFakeDao()
+                val vm = newVm(responses, previewDao = dao)
+                vm.onSymbolInputChange("SPY")
+                vm.onQuantityInputChange("1")
+
+                vm.prepareGuidedLocalChain()
+
+                assertEquals(
+                    PaperGuidedPreparationStage.BLOCKED,
+                    vm.uiState.value.guidedPreparationStage,
+                )
+                assertNull(vm.uiState.value.lastDraft)
+                assertTrue(dao.rows.isEmpty())
+            }
+        }
+
+    @Test
+    fun `guided preparation requires a fresh live quote midpoint`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val unsafePriceVms = listOf(
+                newVm(
+                    okResponses(),
+                    previewDao = PreviewQueueFakeDao(),
+                    includeLiveQuote = false,
+                ),
+                newVm(
+                    okResponses(),
+                    previewDao = PreviewQueueFakeDao(),
+                    liveQuoteAgeMillis = 11_000L,
+                ),
+            )
+            unsafePriceVms.forEach { vm ->
+                vm.onSymbolInputChange("SPY")
+                vm.onQuantityInputChange("1")
+
+                vm.prepareGuidedLocalChain()
+
+                assertEquals(
+                    PaperGuidedPreparationStage.BLOCKED,
+                    vm.uiState.value.guidedPreparationStage,
+                )
+                assertNull(vm.uiState.value.lastDraft)
+                assertNull(vm.uiState.value.lastPayloadPreview)
+            }
+        }
+
+    @Test
+    fun `guided preparation requires the dry run audit to be persisted`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val dao = PreviewQueueFakeDao()
+            val vm = newVm(okResponses(), previewDao = dao, auditDao = null)
+            vm.onSymbolInputChange("SPY")
+            vm.onQuantityInputChange("1")
+
+            vm.prepareGuidedLocalChain()
+
+            assertEquals(PaperGuidedPreparationStage.BLOCKED, vm.uiState.value.guidedPreparationStage)
+            assertNull(vm.uiState.value.lastDraft)
+            assertTrue(dao.rows.isEmpty())
+        }
+
+    @Test
+    fun `guided preparation stops before readiness when preview persistence fails`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val vm = newVm(okResponses(), previewDao = FailingPreviewQueueDao())
+            vm.onSymbolInputChange("SPY")
+            vm.onQuantityInputChange("1")
+
+            vm.prepareGuidedLocalChain()
+
+            val state = vm.uiState.value
+            assertEquals(PaperGuidedPreparationStage.BLOCKED, state.guidedPreparationStage)
+            assertEquals(PaperOrderPayloadPreviewStatus.READY_PREVIEW, state.lastPayloadPreview?.status)
+            assertNotNull(state.lastPayloadPreviewError)
+            assertNull(state.lastExecutionReadiness)
+        }
+
+    @Test
+    fun `guided preparation ignores a double tap and persists one preview`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val dao = PreviewQueueFakeDao()
+        val vm = newVm(okResponses(), previewDao = dao)
+        vm.onSymbolInputChange("SPY")
+        vm.onQuantityInputChange("1")
+
+        vm.prepareGuidedLocalChain()
+        vm.prepareGuidedLocalChain()
+        advanceUntilIdle()
+
+        assertEquals(PaperGuidedPreparationStage.READY, vm.uiState.value.guidedPreparationStage)
+        assertEquals(1, dao.rows.size)
+    }
+
+    @Test
+    fun `prepared preview synchronization rejects stale manual selection`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val dao = PreviewQueueFakeDao()
+            val vm = newVm(okResponses(), previewDao = dao)
+            vm.onSymbolInputChange("SPY")
+            vm.onQuantityInputChange("1")
+            vm.prepareGuidedLocalChain()
+            val preflight = vm.uiState.value
+            val preparedId = preflight.lastPayloadPreview!!.previewId
+            val synchronizedManual = PaperManualSubmitUiState.initial(true).copy(
+                previewId = preparedId,
+                preflightStatus = PreflightStatus.ALLOWED_DRY_RUN.name,
+                readinessStatus =
+                    PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED.name,
+            )
+
+            assertTrue(preparedPreviewIsSynchronized(preflight, synchronizedManual))
+            assertFalse(
+                preparedPreviewIsSynchronized(
+                    preflight,
+                    synchronizedManual.copy(previewId = "stale-preview"),
+                ),
+            )
+            assertFalse(
+                preparedPreviewIsSynchronized(
+                    preflight,
+                    synchronizedManual.copy(readinessStatus = "NOT_CHECKED"),
+                ),
+            )
+        }
+
+    @Test
+    fun `manual confirmation UI allows typing only for the exact expected blockers`() {
+        val required = "SUBMIT PAPER SPY BUY 1"
+        val awaiting = PaperManualSubmitUiState.initial(true).copy(
+            sessionArmed = true,
+            finalPriceGateResult = "ALLOWED",
+            finalPriceRawAgeMillis = -1_499L,
+            requiredConfirmationText = required,
+            gateReasons = listOf(
+                PaperOrderSubmitError.PREVIEW_MISMATCH,
+                PaperOrderSubmitError.CONFIRMATION_MISSING,
+            ),
+        )
+
+        assertTrue(paperManualConfirmationUiGate(awaiting).mayType)
+        assertFalse(paperManualConfirmationUiGate(awaiting).maySubmit)
+
+        val prudentAbortBoundary = awaiting.copy(finalPriceRawAgeMillis = -1_500L)
+        assertFalse(paperManualConfirmationUiGate(prudentAbortBoundary).mayType)
+        assertFalse(paperManualConfirmationUiGate(prudentAbortBoundary).maySubmit)
+
+        val unexpected = awaiting.copy(
+            gateReasons = listOf(PaperOrderSubmitError.MARKET_CLOSED),
+        )
+        assertFalse(paperManualConfirmationUiGate(unexpected).mayType)
+        assertFalse(paperManualConfirmationUiGate(unexpected).maySubmit)
+
+        val ready = awaiting.copy(
+            confirmationInput = required,
+            confirmationExpiresAtEpochMillis = 100_000L,
+            gateAllowed = true,
+            gateReasons = emptyList(),
+        )
+        assertFalse(paperManualConfirmationUiGate(ready, nowEpochMillis = 99_999L).mayType)
+        assertTrue(paperManualConfirmationUiGate(ready, nowEpochMillis = 100_000L).maySubmit)
+        assertFalse(paperManualConfirmationUiGate(ready, nowEpochMillis = 100_001L).maySubmit)
+    }
+
+    @Test
     fun `no method on PaperOrderPreflightViewModel has an execution-shape name`() {
         // HTTP-verb substrings (`put`, `post`) are intentionally
         // excluded here because Compose UI methods legitimately
@@ -378,6 +682,46 @@ class PaperOrderPreflightViewModelTest {
 }
 
 // --- Test doubles -----------------------------------------------------
+
+private class PreflightFakeAuditDao : PaperOrderDryRunAuditDao {
+    val rows: MutableList<PaperOrderDryRunAuditEntity> = mutableListOf()
+    private var nextId: Long = 1L
+
+    override suspend fun insert(audit: PaperOrderDryRunAuditEntity): Long {
+        val stored = if (audit.id == 0L) audit.copy(id = nextId++) else audit
+        rows += stored
+        return stored.id
+    }
+
+    override suspend fun countAll(): Int = rows.size
+
+    override suspend fun recent(limit: Int): List<PaperOrderDryRunAuditEntity> =
+        rows.sortedByDescending { it.createdAtEpochMillis }.take(limit)
+
+    override suspend fun recentBySymbol(
+        symbol: String,
+        limit: Int,
+    ): List<PaperOrderDryRunAuditEntity> =
+        rows.filter { it.symbol == symbol }
+            .sortedByDescending { it.createdAtEpochMillis }
+            .take(limit)
+}
+
+private class FailingPreviewQueueDao : PaperOrderPayloadPreviewDao {
+    override suspend fun insert(preview: PaperOrderPayloadPreviewEntity): Long =
+        error("simulated local persistence failure")
+
+    override suspend fun countAll(): Int = 0
+
+    override suspend fun recent(limit: Int): List<PaperOrderPayloadPreviewEntity> = emptyList()
+
+    override suspend fun recentBySymbol(
+        symbol: String,
+        limit: Int,
+    ): List<PaperOrderPayloadPreviewEntity> = emptyList()
+
+    override suspend fun byPreviewId(previewId: String): PaperOrderPayloadPreviewEntity? = null
+}
 
 private class PreflightInMemoryStore : SecureAlpacaCredentialsStore {
     @Volatile private var creds: AlpacaCredentials? = null

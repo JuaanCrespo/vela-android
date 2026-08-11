@@ -89,14 +89,17 @@ class PaperManualSubmitViewModelTest {
 
         fixture.vm.onConfirmationInputChange("wrong")
         assertFalse(fixture.vm.uiState.value.gateAllowed)
+        assertEquals(null, fixture.vm.uiState.value.confirmationExpiresAtEpochMillis)
         fixture.vm.onConfirmationInputChange("SUBMIT PAPER SPY BUY 1")
         assertTrue(fixture.vm.uiState.value.gateAllowed)
+        assertEquals(40_000L, fixture.vm.uiState.value.confirmationExpiresAtEpochMillis)
 
         fixture.vm.submitOnce()
         val state = fixture.vm.uiState.value
         assertEquals(PaperOrderSubmitStatus.SUBMITTED, state.lastResult?.status)
         assertFalse(state.sessionArmed)
         assertFalse(state.gateAllowed)
+        assertEquals(null, state.confirmationExpiresAtEpochMillis)
         assertEquals(1, fixture.submitHttp.callCount)
 
         fixture.vm.submitOnce()

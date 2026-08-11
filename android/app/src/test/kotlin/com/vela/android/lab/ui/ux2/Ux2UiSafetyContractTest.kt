@@ -29,10 +29,18 @@ class Ux2UiSafetyContractTest {
         val dashboard = source("ui/dashboard/OfflineDashboardScreen.kt")
 
         listOf(
-            "enabled = state.compileTimeEnabled && state.previewId != null",
+            "state.previewId != null,",
+            "preparationReady,",
+            "PaperGuidedPreparationStage.READY",
             "enabled = !state.isSubmitting",
-            "enabled = !state.isRefreshing && !state.isSubmitting",
-            "enabled = state.gateAllowed && !state.isSubmitting",
+            "enabled = confirmationGate.mayType",
+            "enabled = confirmationGate.maySubmit",
+            "paperManualConfirmationUiGate(",
+            "MANUAL_CONFIRMATION_RAW_AGE_ABORT_THRESHOLD_MILLIS",
+            "confirmationExpiresAtEpochMillis",
+            "Confirmación válida:",
+            "imeAction = ImeAction.Done",
+            "LiveRegionMode.Assertive",
             "Final price raw age (ms)",
             "Future skew tolerance (ms)",
             "Allowed drift threshold",
@@ -44,6 +52,69 @@ class Ux2UiSafetyContractTest {
         }
         assertEquals(1, dashboard.windowed("paperManualSubmitViewModel?.submitOnce()".length)
             .count { it == "paperManualSubmitViewModel?.submitOnce()" })
+        assertFalse(dashboard.contains("Actualizar gates (invalida confirmación)"))
+    }
+
+    @Test
+    fun `guided preparation stops before all manual execution surfaces`() {
+        val preflight = source("ui/dashboard/PaperOrderPreflightViewModel.kt")
+        val sections = source("ui/dashboard/VelaDashboardSections.kt")
+        val dashboard = source("ui/dashboard/OfflineDashboardScreen.kt")
+
+        assertTrue(preflight.contains("fun prepareGuidedLocalChain()"))
+        assertTrue(preflight.contains("PaperGuidedPreparationStage.READY"))
+        listOf(
+            "armSession(",
+            "onConfirmationInputChange(",
+            "submitOnce(",
+            "PaperManualSubmitTokenStore",
+            "PaperManualSubmitExecutor",
+        ).forEach { forbidden ->
+            assertFalse(
+                preflight.contains(forbidden),
+                "Guided preparation reached manual execution surface: $forbidden",
+            )
+        }
+        assertTrue(sections.contains("preflightPrepareGuided"))
+        assertTrue(sections.contains("preparedPreviewIsSynchronized("))
+        assertTrue(dashboard.contains("fun preparedPreviewIsSynchronized("))
+        assertTrue(dashboard.contains("manual?.previewId == preview?.previewId"))
+        assertTrue(dashboard.contains("result?.priceSource == MarketPriceSource.LIVE_QUOTE_MID.name"))
+        assertTrue(dashboard.contains("result?.priceFreshness == PriceFreshness.FRESH.name"))
+        assertTrue(dashboard.contains("paperManualSubmitViewModel?.armSession()"))
+        assertTrue(preflight.contains("account?.status =="))
+        assertTrue(preflight.contains("!outcome.auditPersisted"))
+    }
+
+    @Test
+    fun `production Paper section exposes only one guided pre arm action`() {
+        val sections = source("ui/dashboard/VelaDashboardSections.kt")
+        val paperSection = sections
+            .substringAfter("private fun PaperSection(")
+            .substringBefore("private fun RiskSection(")
+
+        assertTrue(paperSection.contains("PaperOrderPreparationCard("))
+        assertTrue(paperSection.contains("onPrepare = actions.preflightPrepareGuided"))
+        assertTrue(paperSection.contains("PaperManualSubmitCard("))
+        listOf(
+            "technicalStepsExpanded",
+            "Mostrar pasos técnicos",
+            "Ocultar pasos técnicos",
+            "PaperOrderPreflightCard(",
+            "PaperExecutionReadinessCard(",
+            "actions.preflightRun",
+            "actions.preflightBuildDraft",
+            "actions.preflightBuildPreview",
+            "actions.readinessCheck",
+            "actions.disabledExecutionAttempt",
+            "PaperOrderPayloadPreviewQueueCard(",
+            "PaperDryRunAuditCard(",
+        ).forEach { forbidden ->
+            assertFalse(
+                paperSection.contains(forbidden),
+                "Production Paper section exposes technical surface: $forbidden",
+            )
+        }
     }
 
     @Test

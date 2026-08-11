@@ -7,6 +7,16 @@ import com.vela.android.lab.data.paper.preflight.PaperOrderPreflightResult
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreview
 import com.vela.android.lab.data.paper.preflight.PaperOrderRequestDraft
 
+enum class PaperGuidedPreparationStage {
+    IDLE,
+    PREFLIGHT,
+    DRAFT,
+    PREVIEW,
+    READINESS,
+    READY,
+    BLOCKED,
+}
+
 /**
  * Phase 2.m read-only UI state for the "Paper order preflight —
  * dry run only" card. Pure data; no Android imports.
@@ -39,6 +49,10 @@ data class PaperOrderPreflightUiState(
     val lastExecutionReadinessError: String?,
     /** Always EXECUTION_DISABLED; never represents a network attempt. */
     val lastDisabledExecutionResult: DisabledExecutionResult?,
+    /** One-tap coordinator for the existing read-only/local preparation steps. */
+    val guidedPreparationStage: PaperGuidedPreparationStage,
+    val isGuidedPreparationRunning: Boolean,
+    val guidedPreparationError: String?,
 ) {
     companion object {
         val Initial: PaperOrderPreflightUiState = PaperOrderPreflightUiState(
@@ -58,6 +72,9 @@ data class PaperOrderPreflightUiState(
             lastExecutionReadiness = null,
             lastExecutionReadinessError = null,
             lastDisabledExecutionResult = null,
+            guidedPreparationStage = PaperGuidedPreparationStage.IDLE,
+            isGuidedPreparationRunning = false,
+            guidedPreparationError = null,
         )
     }
 }

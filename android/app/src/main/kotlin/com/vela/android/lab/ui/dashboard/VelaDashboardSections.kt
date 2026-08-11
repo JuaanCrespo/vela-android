@@ -95,11 +95,7 @@ internal data class VelaDashboardActions(
     val preflightSymbolChanged: (String) -> Unit,
     val preflightSideChanged: (OrderSide) -> Unit,
     val preflightQuantityChanged: (String) -> Unit,
-    val preflightRun: () -> Unit,
-    val preflightBuildDraft: () -> Unit,
-    val preflightBuildPreview: () -> Unit,
-    val readinessCheck: () -> Unit,
-    val disabledExecutionAttempt: () -> Unit,
+    val preflightPrepareGuided: () -> Unit,
     val dryRunAuditRefresh: () -> Unit,
     val previewQueueRefresh: () -> Unit,
     val manualPaperArm: () -> Unit,
@@ -379,19 +375,13 @@ private fun PaperSection(
             }
         }
         data.preflight?.let {
-            PaperOrderPreflightCard(
+            PaperOrderPreparationCard(
                 state = it,
+                manualSessionArmed = data.manualPaper?.sessionArmed == true,
                 onSymbolChange = actions.preflightSymbolChanged,
                 onSideChange = actions.preflightSideChanged,
                 onQuantityChange = actions.preflightQuantityChanged,
-                onRun = actions.preflightRun,
-                onBuildDraft = actions.preflightBuildDraft,
-                onBuildPayloadPreview = actions.preflightBuildPreview,
-            )
-            PaperExecutionReadinessCard(
-                state = it,
-                onCheck = actions.readinessCheck,
-                onAttemptDisabled = actions.disabledExecutionAttempt,
+                onPrepare = actions.preflightPrepareGuided,
             )
         }
         data.manualPaper?.let { manual ->
@@ -402,20 +392,17 @@ private fun PaperSection(
             ) {
                 PaperManualSubmitCard(
                     state = manual,
+                    preparationReady = preparedPreviewIsSynchronized(
+                        data.preflight,
+                        manual,
+                    ),
                     onArm = actions.manualPaperArm,
                     onDisarm = actions.manualPaperDisarm,
-                    onRefresh = actions.manualPaperRefresh,
                     onWarningAccepted = actions.manualPaperWarningChanged,
                     onConfirmationChange = actions.manualPaperConfirmationChanged,
                     onSubmit = actions.manualPaperAction,
                 )
             }
-        }
-        data.previewQueue?.let {
-            PaperOrderPayloadPreviewQueueCard(it, actions.previewQueueRefresh)
-        }
-        data.dryRunAudit?.let {
-            PaperDryRunAuditCard(it, actions.dryRunAuditRefresh)
         }
         Spacer(modifier = Modifier.height(56.dp))
     }

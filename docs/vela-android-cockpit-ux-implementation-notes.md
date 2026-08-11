@@ -40,10 +40,10 @@ New file [`ui/theme/VelaComponents.kt`](../android/app/src/main/kotlin/com/vela/
   2. **Demo / diagnóstico** — Demo controls, Alpaca Paper (test) credentials.
   3. **Mercado** — Alpaca real market data, Watchlist, Tick diagnostics, Recent market data.
   4. **Paper account · Riesgo** — Alpaca Paper account, Paper portfolio risk.
-  5. **Paper preflight · dry-run** — Preflight card + Paper execution readiness.
+  5. **Preparación Paper guiada** — one action coordinates preflight → draft → preview → readiness; results are displayed read-only and no legacy step button is mounted in the production Paper section.
   6. **Manual Paper submit · zona protegida** — the isolated one-shot card, wrapped in `VelaActionZone` with an `ARMED / SAFE` trailing pill on the header.
   7. **Auditoría local** — Payload review queue + Dry-run audit.
-- Wrapped `PaperManualSubmitCard` inside `VelaActionZone(...) { PaperManualSubmitCard(...) }`. The inner card's rows, buttons, gate logic, and text are **byte-for-byte unchanged**.
+- Wrapped `PaperManualSubmitCard` inside `VelaActionZone(...) { PaperManualSubmitCard(...) }`. Manual arm, confirmation, and submit remain separate from the guided preparation action and retain their fail-closed gates.
 
 ### 1.4 Safety strings preserved verbatim
 

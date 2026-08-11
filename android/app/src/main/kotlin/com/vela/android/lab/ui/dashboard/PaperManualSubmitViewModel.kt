@@ -120,6 +120,7 @@ class PaperManualSubmitViewModel(
             it.copy(
                 sessionArmed = false,
                 confirmationInput = "",
+                confirmationExpiresAtEpochMillis = null,
                 gateAllowed = false,
                 gateReasons = listOf(com.vela.android.lab.data.paper.submit.PaperOrderSubmitError.FEATURE_DISABLED),
                 isSubmitting = false,
@@ -135,6 +136,7 @@ class PaperManualSubmitViewModel(
             it.copy(
                 warningAccepted = accepted,
                 confirmationInput = "",
+                confirmationExpiresAtEpochMillis = null,
                 gateAllowed = false,
             )
         }
@@ -142,7 +144,13 @@ class PaperManualSubmitViewModel(
     }
 
     fun onConfirmationInputChange(value: String) {
-        _uiState.update { it.copy(confirmationInput = value, lastError = null) }
+        _uiState.update {
+            it.copy(
+                confirmationInput = value,
+                confirmationExpiresAtEpochMillis = null,
+                lastError = null,
+            )
+        }
         val currentPreview = preview
         if (currentPreview == null || value != _uiState.value.requiredConfirmationText) {
             tokenStore.invalidate()
@@ -168,6 +176,12 @@ class PaperManualSubmitViewModel(
             }
             is PaperManualSubmitTokenIssue.Issued -> {
                 confirmation = issued.confirmation
+                _uiState.update {
+                    it.copy(
+                        confirmationExpiresAtEpochMillis =
+                            issued.confirmation.expiresAtEpochMillis,
+                    )
+                }
                 request = PaperOrderSubmitRequest(
                     submitAttemptId = attemptIdFactory(),
                     previewId = currentPreview.previewId,
@@ -197,6 +211,7 @@ class PaperManualSubmitViewModel(
             it.copy(
                 isRefreshing = true,
                 confirmationInput = "",
+                confirmationExpiresAtEpochMillis = null,
                 gateAllowed = false,
                 lastResult = null,
                 lastError = null,
@@ -264,6 +279,7 @@ class PaperManualSubmitViewModel(
                     sessionArmed = false,
                     isSubmitting = false,
                     confirmationInput = "",
+                    confirmationExpiresAtEpochMillis = null,
                     gateAllowed = false,
                     lastResult = result,
                     lastError = result.safeErrorMessage,
