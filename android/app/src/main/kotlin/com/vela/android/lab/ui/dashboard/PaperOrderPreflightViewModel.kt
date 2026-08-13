@@ -166,6 +166,33 @@ class PaperOrderPreflightViewModel(
         }
     }
 
+    /**
+     * Returns the local preparation surface to its safe starting state without
+     * changing the operator's order form. Persisted dry-run/preview audit rows
+     * are append-only and are deliberately not touched here.
+     */
+    fun canResetForNewPreparation(): Boolean {
+        val current = _uiState.value
+        return listOf(
+            current.isGuidedPreparationRunning,
+            current.isRunning,
+            current.isBuildingPayloadPreview,
+            current.isCheckingExecutionReadiness,
+        ).none { it }
+    }
+
+    fun resetForNewPreparation(): Boolean {
+        val current = _uiState.value
+        if (!canResetForNewPreparation()) return false
+
+        _uiState.value = PaperOrderPreflightUiState.Initial.copy(
+            symbolInput = current.symbolInput,
+            side = current.side,
+            quantityInput = current.quantityInput,
+        )
+        return true
+    }
+
     /** Runs the existing read-only/local chain and stops before manual session arming. */
     fun prepareGuidedLocalChain() {
         val current = _uiState.value

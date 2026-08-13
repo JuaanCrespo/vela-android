@@ -238,6 +238,22 @@ fun OfflineDashboardScreen(
                 paperManualSubmitViewModel?.onConfirmationInputChange(it)
             },
             manualPaperAction = { paperManualSubmitViewModel?.submitOnce() },
+            manualPaperRefreshOrderStatus = {
+                paperManualSubmitViewModel?.refreshOrderStatus()
+            },
+            manualPaperNewPreparation = {
+                val manualCanReset =
+                    paperManualSubmitViewModel?.canResetForNewPreparation() == true
+                val preflightCanReset =
+                    paperOrderPreflightViewModel?.canResetForNewPreparation() == true
+                if (manualCanReset && preflightCanReset) {
+                    val preflightReset =
+                        paperOrderPreflightViewModel?.resetForNewPreparation() == true
+                    if (preflightReset) {
+                        paperManualSubmitViewModel?.resetForNewPreparation()
+                    }
+                }
+            },
             candleSymbolChanged = { candlesViewModel?.onSymbolSelected(it) },
             candleCountChanged = { candlesViewModel?.onCandleCountSelected(it) },
             candlesRefresh = { candlesViewModel?.refresh() },
@@ -499,6 +515,8 @@ internal fun PaperManualSubmitCard(
     onWarningAccepted: (Boolean) -> Unit,
     onConfirmationChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onRefreshOrderStatus: () -> Unit = {},
+    onNewPreparation: () -> Unit = {},
 ) {
     var technicalDetailsExpanded by rememberSaveable { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -550,6 +568,8 @@ internal fun PaperManualSubmitCard(
                 onWarningAccepted = onWarningAccepted,
                 onConfirmationChange = onConfirmationChange,
                 onSubmit = onSubmit,
+                onRefreshOrderStatus = onRefreshOrderStatus,
+                onNewPreparation = onNewPreparation,
             )
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
@@ -606,10 +626,46 @@ internal fun PaperManualSubmitCard(
             }
             state.lastResult?.let { result ->
                 Spacer(modifier = Modifier.height(8.dp))
-                LabeledRow("Submit result", result.status.name)
+                LabeledRow("Estado VELA", result.status.name)
                 LabeledRow("Attempt id", result.submitAttemptId)
                 LabeledRow("Client order id", result.clientOrderId)
                 LabeledRow("Paper order id", result.alpacaOrderId ?: "—")
+                if (result.status.name == "SUBMITTED" && state.orderStatusSnapshot == null) {
+                    Text(
+                        "SUBMITTED confirma que VELA envió la orden. FILLED se confirma " +
+                            "consultando el estado en Alpaca.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            state.trackedOrder?.let { tracked ->
+                Spacer(modifier = Modifier.height(8.dp))
+                SectionTitle("Seguimiento de la orden · solo lectura")
+                LabeledRow(
+                    "Estado Alpaca",
+                    state.orderStatusSnapshot?.displayStatus ?: "NO CONSULTADO",
+                )
+                LabeledRow("Order id", tracked.orderId)
+                state.orderStatusSnapshot?.let { lifecycle ->
+                    LabeledRow("Cantidad ejecutada", lifecycle.filledQuantity.toString())
+                    LabeledRow(
+                        "Precio promedio ejecutado",
+                        formatPrice(lifecycle.filledAveragePriceUsd),
+                    )
+                    LabeledRow("Ejecutada en", lifecycle.filledAtIso ?: "—")
+                }
+                LabeledRow(
+                    "Última consulta",
+                    formatEpochMillis(state.orderStatusCheckedAtEpochMillis),
+                )
+            }
+            state.orderStatusError?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
             state.lastError?.let { error ->
                 Text(
@@ -631,6 +687,8 @@ private fun PaperManualSubmitControls(
     onWarningAccepted: (Boolean) -> Unit,
     onConfirmationChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onRefreshOrderStatus: () -> Unit,
+    onNewPreparation: () -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -654,13 +712,84 @@ private fun PaperManualSubmitControls(
             color = MaterialTheme.colorScheme.error,
         )
     }
+    if (!state.sessionArmed && state.lastResult == null &&
+        !state.orderTrackingRestoreComplete
+    ) {
+        Text(
+            "Verificando la auditoría Paper local. La preparación permanece bloqueada.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    if (!state.sessionArmed && state.lastResult == null &&
+        state.untrackableSubmittedOrder
+    ) {
+        Text(
+            "El último intento no puede rastrearse con seguridad. " +
+                "No se habilita otra orden.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
     if (!state.sessionArmed) {
         if (state.lastResult != null) {
             Text(
-                "Intento finalizado. No se puede volver a armar esta preview.",
+                "Intento finalizado. La preview anterior no se reutiliza.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (state.trackedOrder != null) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onRefreshOrderStatus,
+                    enabled = !state.isRefreshingOrderStatus && !state.isSubmitting,
+                ) {
+                    Text(
+                        if (state.isRefreshingOrderStatus) "Consultando estado Alpaca…"
+                        else "Consultar estado Alpaca · solo GET",
+                    )
+                }
+            }
+            if (state.newPreparationAllowed) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onNewPreparation,
+                    enabled = !state.isSubmitting && !state.isRefreshingOrderStatus,
+                ) {
+                    Text("Preparar otra orden Paper")
+                }
+            } else {
+                Text(
+                    if (state.trackedOrder != null) {
+                        "Consultá el estado. Se habilita otra preparación únicamente cuando " +
+                            "Alpaca informe un estado terminal."
+                    } else {
+                        "El resultado no permite iniciar otra orden de forma segura."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return
+        }
+        if (state.trackedOrder != null && !state.newPreparationAllowed) {
+            Text(
+                "Hay una orden Paper enviada cuyo estado final todavía no fue verificado.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onRefreshOrderStatus,
+                enabled = !state.isRefreshingOrderStatus,
+            ) {
+                Text(
+                    if (state.isRefreshingOrderStatus) "Consultando estado Alpaca…"
+                    else "Consultar estado Alpaca · solo GET",
+                )
+            }
             return
         }
         OutlinedButton(
@@ -689,7 +818,7 @@ private fun PaperManualSubmitControls(
         onClick = onDisarm,
         enabled = !state.isSubmitting,
     ) {
-        Text("Abortar y desarmar")
+            Text("Abortar y desarmar")
     }
     val confirmationGate = paperManualConfirmationUiGate(
         state = state,
@@ -1352,6 +1481,7 @@ internal fun PaperDryRunAuditCard(
 internal fun PaperOrderPreparationCard(
     state: PaperOrderPreflightUiState,
     manualSessionArmed: Boolean,
+    pendingSubmittedOrder: Boolean = false,
     onSymbolChange: (String) -> Unit,
     onSideChange: (OrderSide) -> Unit,
     onQuantityChange: (String) -> Unit,
@@ -1361,6 +1491,7 @@ internal fun PaperOrderPreparationCard(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val inputsEnabled = !state.isGuidedPreparationRunning && !manualSessionArmed &&
+        !pendingSubmittedOrder &&
         stage != PaperGuidedPreparationStage.READY
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -1445,7 +1576,7 @@ internal fun PaperOrderPreparationCard(
                     focusManager.clearFocus()
                     onPrepare()
                 },
-                enabled = !manualSessionArmed &&
+                enabled = !manualSessionArmed && !pendingSubmittedOrder &&
                     stage in setOf(
                         PaperGuidedPreparationStage.IDLE,
                         PaperGuidedPreparationStage.BLOCKED,
@@ -1470,6 +1601,14 @@ internal fun PaperOrderPreparationCard(
                     it,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
                     color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (pendingSubmittedOrder) {
+                Text(
+                    "La preparación está bloqueada hasta resolver abajo el seguimiento " +
+                        "del intento anterior.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
                 )
             }
             if (manualSessionArmed) {
@@ -1575,6 +1714,9 @@ internal fun preparedPreviewIsSynchronized(
         manual?.readinessStatus ==
             PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED.name,
         manual?.lastResult == null,
+        manual?.orderTrackingRestoreComplete == true,
+        manual?.untrackableSubmittedOrder == false,
+        manual?.let { it.trackedOrder == null || it.newPreparationAllowed } == true,
     ).all { it }
 }
 

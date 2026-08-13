@@ -104,6 +104,8 @@ internal data class VelaDashboardActions(
     val manualPaperWarningChanged: (Boolean) -> Unit,
     val manualPaperConfirmationChanged: (String) -> Unit,
     val manualPaperAction: () -> Unit,
+    val manualPaperRefreshOrderStatus: () -> Unit,
+    val manualPaperNewPreparation: () -> Unit,
     val candleSymbolChanged: (String) -> Unit,
     val candleCountChanged: (Int) -> Unit,
     val candlesRefresh: () -> Unit,
@@ -378,6 +380,11 @@ private fun PaperSection(
             PaperOrderPreparationCard(
                 state = it,
                 manualSessionArmed = data.manualPaper?.sessionArmed == true,
+                pendingSubmittedOrder = data.manualPaper?.let { manual ->
+                    !manual.orderTrackingRestoreComplete ||
+                        manual.untrackableSubmittedOrder ||
+                        (manual.trackedOrder != null && !manual.newPreparationAllowed)
+                } ?: false,
                 onSymbolChange = actions.preflightSymbolChanged,
                 onSideChange = actions.preflightSideChanged,
                 onQuantityChange = actions.preflightQuantityChanged,
@@ -401,6 +408,8 @@ private fun PaperSection(
                     onWarningAccepted = actions.manualPaperWarningChanged,
                     onConfirmationChange = actions.manualPaperConfirmationChanged,
                     onSubmit = actions.manualPaperAction,
+                    onRefreshOrderStatus = actions.manualPaperRefreshOrderStatus,
+                    onNewPreparation = actions.manualPaperNewPreparation,
                 )
             }
         }

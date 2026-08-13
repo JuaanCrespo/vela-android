@@ -3,6 +3,8 @@ package com.vela.android.lab.ui.dashboard
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitError
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitResult
 import com.vela.android.lab.data.paper.submit.PaperFinalPriceStabilityPolicy
+import com.vela.android.lab.data.paper.status.PaperOrderStatusSnapshot
+import com.vela.android.lab.data.paper.status.TrackedPaperOrder
 
 /** Credential-free foreground state for one manually confirmed Paper attempt. */
 data class PaperManualSubmitUiState(
@@ -49,6 +51,14 @@ data class PaperManualSubmitUiState(
     val isSubmitting: Boolean,
     val lastResult: PaperOrderSubmitResult?,
     val lastError: String?,
+    val trackedOrder: TrackedPaperOrder?,
+    val orderStatusSnapshot: PaperOrderStatusSnapshot?,
+    val orderStatusCheckedAtEpochMillis: Long?,
+    val isRefreshingOrderStatus: Boolean,
+    val orderStatusError: String?,
+    val newPreparationAllowed: Boolean,
+    val orderTrackingRestoreComplete: Boolean,
+    val untrackableSubmittedOrder: Boolean,
 ) {
     companion object {
         fun initial(compileTimeEnabled: Boolean): PaperManualSubmitUiState =
@@ -99,6 +109,14 @@ data class PaperManualSubmitUiState(
                 isSubmitting = false,
                 lastResult = null,
                 lastError = null,
+                trackedOrder = null,
+                orderStatusSnapshot = null,
+                orderStatusCheckedAtEpochMillis = null,
+                isRefreshingOrderStatus = false,
+                orderStatusError = null,
+                newPreparationAllowed = false,
+                orderTrackingRestoreComplete = false,
+                untrackableSubmittedOrder = false,
             )
     }
 }

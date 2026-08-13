@@ -39,7 +39,13 @@ class Ux2UiSafetyContractTest {
             "MANUAL_CONFIRMATION_RAW_AGE_ABORT_THRESHOLD_MILLIS",
             "confirmationExpiresAtEpochMillis",
             "Confirmación válida:",
-            "imeAction = ImeAction.Done",
+            "Escribí exactamente:",
+            "value = state.confirmationInput",
+            "onValueChange = onConfirmationChange",
+            "Confirmación manual exacta",
+            "KeyboardCapitalization.Characters",
+            "autoCorrect = false",
+            "ImeAction.Done",
             "LiveRegionMode.Assertive",
             "Final price raw age (ms)",
             "Future skew tolerance (ms)",
@@ -52,7 +58,11 @@ class Ux2UiSafetyContractTest {
         }
         assertEquals(1, dashboard.windowed("paperManualSubmitViewModel?.submitOnce()".length)
             .count { it == "paperManualSubmitViewModel?.submitOnce()" })
+        assertEquals(1, dashboard.windowed("onClick = onSubmit".length)
+            .count { it == "onClick = onSubmit" })
         assertFalse(dashboard.contains("Actualizar gates (invalida confirmación)"))
+        assertFalse(dashboard.contains("onConfirmationChange(state.requiredConfirmationText)"))
+        assertFalse(dashboard.contains("Confirmar manualmente esta orden"))
     }
 
     @Test
@@ -115,6 +125,46 @@ class Ux2UiSafetyContractTest {
                 "Production Paper section exposes technical surface: $forbidden",
             )
         }
+    }
+
+    @Test
+    fun `Paper lifecycle lookup is explicit GET only and reset stays local`() {
+        val dashboard = source("ui/dashboard/OfflineDashboardScreen.kt")
+        val sections = source("ui/dashboard/VelaDashboardSections.kt")
+        val application = source("VelaLabApplication.kt")
+        val activity = source("MainActivity.kt")
+        val statusSources = sourceDirectory("data/paper/status").walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .joinToString("\n") { it.readText() }
+
+        listOf(
+            "Consultar estado Alpaca · solo GET",
+            "Preparar otra orden Paper",
+            "Estado VELA",
+            "Estado Alpaca",
+            "paperManualSubmitViewModel?.refreshOrderStatus()",
+            "paperManualSubmitViewModel?.canResetForNewPreparation() == true",
+            "paperOrderPreflightViewModel?.canResetForNewPreparation() == true",
+            "paperOrderPreflightViewModel?.resetForNewPreparation() == true",
+            "paperManualSubmitViewModel?.resetForNewPreparation()",
+        ).forEach { contract ->
+            assertTrue(dashboard.contains(contract), "Missing lifecycle UI contract: $contract")
+        }
+        assertTrue(sections.contains("manualPaperRefreshOrderStatus"))
+        assertTrue(sections.contains("manualPaperNewPreparation"))
+        assertTrue(sections.contains("pendingSubmittedOrder"))
+        assertTrue(application.contains("OkHttpAlpacaPaperOrderStatusHttpClient()"))
+        assertTrue(activity.contains("orderStatusClient = app.alpacaPaperOrderStatusReadOnlyClient"))
+        assertTrue(
+            activity.contains(
+                "orderStatusTrackerRepository = app.paperOrderStatusTrackerRepository",
+            ),
+        )
+        assertTrue(statusSources.contains(".get()"))
+        assertFalse(Regex("""\.\s*(?:post|delete|patch)\s*\(""", RegexOption.IGNORE_CASE)
+            .containsMatchIn(statusSources))
+        assertFalse(statusSources.contains("submitOnce("))
+        assertFalse(statusSources.contains("LaunchedEffect"))
     }
 
     @Test

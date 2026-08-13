@@ -242,6 +242,8 @@ class MainActivity : ComponentActivity() {
                     priceSnapshotProvider = app.marketPriceSnapshotProvider,
                     previewRepository = app.paperOrderPayloadPreviewRepository,
                     appState = app.appState,
+                    orderStatusClient = app.alpacaPaperOrderStatusReadOnlyClient,
+                    orderStatusTrackerRepository = app.paperOrderStatusTrackerRepository,
                 )
             }
         }

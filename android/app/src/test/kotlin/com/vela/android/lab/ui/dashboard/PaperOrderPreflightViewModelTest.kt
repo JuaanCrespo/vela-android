@@ -64,6 +64,7 @@ class PaperOrderPreflightViewModelTest {
 
     private fun newVm(
         responses: Map<String, String>,
+        httpClient: AlpacaHttpClient = PreflightTrackingHttpClient(responses),
         store: PreflightInMemoryStore = PreflightInMemoryStore().apply { runBlockingSave(testCreds) },
         watchlist: Set<String> = setOf("SPY"),
         marketDao: MarketBarDao = PreflightFakeMarketBarDao().also { dao ->
@@ -99,7 +100,6 @@ class PaperOrderPreflightViewModelTest {
         onPayloadPreviewSaved: suspend () -> Unit = {},
     ): PaperOrderPreflightViewModel {
         val nowMillis = 100_000L
-        val httpClient = PreflightTrackingHttpClient(responses)
         val client = AlpacaPaperReadOnlyClient(
             credentialsProvider = AlpacaCredentialsProvider { store.load() },
             httpClient = httpClient,
@@ -420,6 +420,78 @@ class PaperOrderPreflightViewModelTest {
         }
 
     @Test
+    fun `reset for new preparation preserves form and clears derived state without GET`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val previewDao = PreviewQueueFakeDao()
+            val auditDao = PreflightFakeAuditDao()
+            val httpClient = PreflightTrackingHttpClient(okResponses())
+            val vm = newVm(
+                responses = okResponses(),
+                httpClient = httpClient,
+                previewDao = previewDao,
+                auditDao = auditDao,
+            )
+            vm.onSymbolInputChange("SPY")
+            vm.onSideChange(OrderSide.BUY)
+            vm.onQuantityInputChange("1")
+            vm.prepareGuidedLocalChain()
+            assertEquals(PaperGuidedPreparationStage.READY, vm.uiState.value.guidedPreparationStage)
+            assertNotNull(vm.uiState.value.lastResult)
+            assertNotNull(vm.uiState.value.lastDraft)
+            assertNotNull(vm.uiState.value.lastPayloadPreview)
+            assertNotNull(vm.uiState.value.lastExecutionReadiness)
+            val getCountBeforeReset = httpClient.urls.size
+            val previewRowsBeforeReset = previewDao.rows.toList()
+            val auditRowsBeforeReset = auditDao.rows.toList()
+
+            vm.resetForNewPreparation()
+
+            val state = vm.uiState.value
+            assertEquals("SPY", state.symbolInput)
+            assertEquals(OrderSide.BUY, state.side)
+            assertEquals("1", state.quantityInput)
+            assertEquals(PaperGuidedPreparationStage.IDLE, state.guidedPreparationStage)
+            assertFalse(state.isGuidedPreparationRunning)
+            assertFalse(state.isRunning)
+            assertFalse(state.isBuildingPayloadPreview)
+            assertFalse(state.isCheckingExecutionReadiness)
+            assertNull(state.lastResult)
+            assertNull(state.lastInputError)
+            assertNull(state.lastAuditError)
+            assertNull(state.lastDraft)
+            assertNull(state.lastDraftError)
+            assertNull(state.lastPayloadPreview)
+            assertNull(state.lastPayloadPreviewError)
+            assertNull(state.lastExecutionReadiness)
+            assertNull(state.lastExecutionReadinessError)
+            assertNull(state.lastDisabledExecutionResult)
+            assertNull(state.guidedPreparationError)
+            assertEquals(getCountBeforeReset, httpClient.urls.size)
+            assertEquals(previewRowsBeforeReset, previewDao.rows)
+            assertEquals(auditRowsBeforeReset, auditDao.rows)
+        }
+
+    @Test
+    fun `reset for new preparation is a no-op while guided work is pending`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val vm = newVm(okResponses(), previewDao = PreviewQueueFakeDao())
+        vm.onSymbolInputChange("SPY")
+        vm.onSideChange(OrderSide.BUY)
+        vm.onQuantityInputChange("1")
+
+        vm.prepareGuidedLocalChain()
+        val pending = vm.uiState.value
+        assertTrue(pending.isGuidedPreparationRunning)
+        assertEquals(PaperGuidedPreparationStage.PREFLIGHT, pending.guidedPreparationStage)
+
+        vm.resetForNewPreparation()
+
+        assertEquals(pending, vm.uiState.value)
+        advanceUntilIdle()
+        assertEquals(PaperGuidedPreparationStage.READY, vm.uiState.value.guidedPreparationStage)
+    }
+
+    @Test
     fun `guided preparation stops before draft when preflight is blocked`() =
         runTest(UnconfinedTestDispatcher()) {
             val dao = PreviewQueueFakeDao()
@@ -599,6 +671,7 @@ class PaperOrderPreflightViewModelTest {
                 preflightStatus = PreflightStatus.ALLOWED_DRY_RUN.name,
                 readinessStatus =
                     PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED.name,
+                orderTrackingRestoreComplete = true,
             )
 
             assertTrue(preparedPreviewIsSynchronized(preflight, synchronizedManual))

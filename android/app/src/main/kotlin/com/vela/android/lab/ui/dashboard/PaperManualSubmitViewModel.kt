@@ -12,6 +12,13 @@ import com.vela.android.lab.data.paper.preflight.PaperExecutionReadinessSnapshot
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreview
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreviewRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPreflightResult
+import com.vela.android.lab.data.paper.status.AlpacaPaperOrderStatusReadOnlyClient
+import com.vela.android.lab.data.paper.status.AlpacaPaperOrderStatusEndpoint
+import com.vela.android.lab.data.paper.status.PaperOrderLifecycleStatus
+import com.vela.android.lab.data.paper.status.PaperOrderStatusSnapshot
+import com.vela.android.lab.data.paper.status.PaperOrderTrackingRestoreResult
+import com.vela.android.lab.data.paper.status.PaperOrderTrackingSource
+import com.vela.android.lab.data.paper.status.TrackedPaperOrder
 import com.vela.android.lab.data.paper.submit.PaperManualExecutionFeatureGate
 import com.vela.android.lab.data.paper.submit.PaperFinalPriceEvaluation
 import com.vela.android.lab.data.paper.submit.PaperManualSubmitApproval
@@ -23,9 +30,12 @@ import com.vela.android.lab.data.paper.submit.PaperManualSubmitGateInput
 import com.vela.android.lab.data.paper.submit.PaperManualSubmitTokenIssue
 import com.vela.android.lab.data.paper.submit.PaperManualSubmitTokenStore
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitRequest
+import com.vela.android.lab.data.paper.submit.PaperOrderSubmitResult
+import com.vela.android.lab.data.paper.submit.PaperOrderSubmitStatus
 import com.vela.android.lab.state.AppState
 import java.time.Instant
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,6 +53,8 @@ class PaperManualSubmitViewModel(
     private val priceSnapshotProvider: MarketPriceSnapshotProvider,
     private val previewRepository: PaperOrderPayloadPreviewRepository,
     private val appState: AppState,
+    private val orderStatusClient: AlpacaPaperOrderStatusReadOnlyClient,
+    private val orderStatusTrackerRepository: PaperOrderTrackingSource,
     private val clock: () -> Instant = { Instant.now() },
     private val attemptIdFactory: () -> String = { UUID.randomUUID().toString() },
     private val clientOrderIdFactory: () -> String = { "vela-${UUID.randomUUID()}" },
@@ -63,6 +75,11 @@ class PaperManualSubmitViewModel(
     private var reviewQueueMatch: Boolean = false
     private var confirmation: PaperManualSubmitConfirmation? = null
     private var request: PaperOrderSubmitRequest? = null
+    private var confirmationTokenIssuedForArmedSession: Boolean = false
+
+    init {
+        restoreLatestSubmittedOrder()
+    }
 
     fun updateSource(
         preflight: PaperOrderPreflightResult?,
@@ -87,6 +104,7 @@ class PaperManualSubmitViewModel(
         confirmation = null
         request = null
         tokenStore.invalidate()
+        val trackingState = _uiState.value
         _uiState.value = PaperManualSubmitUiState.initial(featureGate.compileTimeEnabled).copy(
             realLocked = appState.realModeLocked,
             previewId = preview?.previewId,
@@ -103,11 +121,23 @@ class PaperManualSubmitViewModel(
             readinessStatus = readiness?.status?.name,
             requiredConfirmationText = preview?.let(PaperManualSubmitTokenStore::requiredText)
                 .orEmpty(),
+            trackedOrder = trackingState.trackedOrder,
+            orderStatusSnapshot = trackingState.orderStatusSnapshot,
+            orderStatusCheckedAtEpochMillis = trackingState.orderStatusCheckedAtEpochMillis,
+            isRefreshingOrderStatus = false,
+            orderStatusError = trackingState.orderStatusError,
+            newPreparationAllowed = trackingState.newPreparationAllowed,
+            orderTrackingRestoreComplete = trackingState.orderTrackingRestoreComplete,
+            untrackableSubmittedOrder = trackingState.untrackableSubmittedOrder,
         )
     }
 
+    @Synchronized
     fun armSession() {
-        if (!featureGate.compileTimeEnabled || preview == null) return
+        if (!featureGate.compileTimeEnabled || preview == null || hasUnresolvedTrackedOrder() ||
+            _uiState.value.sessionArmed || _uiState.value.isSubmitting
+        ) return
+        confirmationTokenIssuedForArmedSession = false
         _uiState.update { it.copy(sessionArmed = true, lastError = null) }
         refreshSubmitReadiness()
     }
@@ -143,7 +173,9 @@ class PaperManualSubmitViewModel(
         recomputeGate()
     }
 
+    @Synchronized
     fun onConfirmationInputChange(value: String) {
+        if (!_uiState.value.sessionArmed || confirmationTokenIssuedForArmedSession) return
         _uiState.update {
             it.copy(
                 confirmationInput = value,
@@ -175,6 +207,7 @@ class PaperManualSubmitViewModel(
                 request = null
             }
             is PaperManualSubmitTokenIssue.Issued -> {
+                confirmationTokenIssuedForArmedSession = true
                 confirmation = issued.confirmation
                 _uiState.update {
                     it.copy(
@@ -271,6 +304,21 @@ class PaperManualSubmitViewModel(
         _uiState.update { it.copy(isSubmitting = true, gateAllowed = false, lastError = null) }
         viewModelScope.launch {
             val result = executor.executeOnce(currentRequest, currentPreview, input)
+            val trackedOrder = result.toTrackedPaperOrder(currentPreview)
+            val existingTracking = _uiState.value
+            val ambiguousWithoutTrackableId =
+                trackedOrder == null && (
+                    result.status == PaperOrderSubmitStatus.SUBMITTED ||
+                        result.status == PaperOrderSubmitStatus.FAILED &&
+                            !result.mayResetWithoutLifecycleLookup()
+                    )
+            val replacesExistingTracking = trackedOrder != null || ambiguousWithoutTrackableId
+            val previousTrackingResolved =
+                existingTracking.orderTrackingRestoreComplete &&
+                    !existingTracking.untrackableSubmittedOrder &&
+                    (existingTracking.trackedOrder == null ||
+                        existingTracking.orderStatusSnapshot?.status
+                            ?.allowsNewPreparation() == true)
             confirmation = null
             request = null
             tokenStore.invalidate()
@@ -283,10 +331,191 @@ class PaperManualSubmitViewModel(
                     gateAllowed = false,
                     lastResult = result,
                     lastError = result.safeErrorMessage,
+                    trackedOrder = when {
+                        trackedOrder != null -> trackedOrder
+                        ambiguousWithoutTrackableId -> null
+                        else -> existingTracking.trackedOrder
+                    },
+                    orderStatusSnapshot =
+                        if (replacesExistingTracking) null
+                        else existingTracking.orderStatusSnapshot,
+                    orderStatusCheckedAtEpochMillis =
+                        if (replacesExistingTracking) null
+                        else existingTracking.orderStatusCheckedAtEpochMillis,
+                    isRefreshingOrderStatus = false,
+                    orderStatusError = when {
+                        ambiguousWithoutTrackableId ->
+                            "The latest Paper attempt cannot be tracked safely. " +
+                                "Another preparation remains blocked."
+                        trackedOrder != null -> null
+                        else -> existingTracking.orderStatusError
+                    },
+                    newPreparationAllowed =
+                        result.mayResetWithoutLifecycleLookup() &&
+                            !replacesExistingTracking && previousTrackingResolved,
+                    orderTrackingRestoreComplete = true,
+                    untrackableSubmittedOrder = when {
+                        ambiguousWithoutTrackableId -> true
+                        trackedOrder != null -> false
+                        else -> existingTracking.untrackableSubmittedOrder
+                    },
                 )
             }
         }
     }
+
+    /** Explicit GET-only lifecycle refresh. Never polls, retries, arms, or submits. */
+    fun refreshOrderStatus() {
+        val current = _uiState.value
+        val trackedOrder = current.trackedOrder ?: return
+        val client = orderStatusClient
+        if (current.sessionArmed || current.isSubmitting || current.isRefreshing ||
+            current.isRefreshingOrderStatus
+        ) {
+            return
+        }
+        _uiState.update {
+            it.copy(
+                isRefreshingOrderStatus = true,
+                orderStatusError = null,
+            )
+        }
+        viewModelScope.launch {
+            val now = clock().toEpochMilli()
+            val result = try {
+                client.fetchOrderStatus(trackedOrder.orderId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _uiState.update {
+                    it.copy(
+                        orderStatusCheckedAtEpochMillis = now,
+                        isRefreshingOrderStatus = false,
+                        orderStatusError =
+                            "Paper order status lookup failed safely; no retry was attempted.",
+                        newPreparationAllowed = false,
+                    )
+                }
+                return@launch
+            }
+            when (result) {
+                is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok -> _uiState.update {
+                    it.copy(
+                        orderStatusSnapshot = result.value,
+                        orderStatusCheckedAtEpochMillis = now,
+                        isRefreshingOrderStatus = false,
+                        orderStatusError = null,
+                        newPreparationAllowed = result.value.status.allowsNewPreparation(),
+                    )
+                }
+                else -> _uiState.update {
+                    it.copy(
+                        orderStatusCheckedAtEpochMillis = now,
+                        isRefreshingOrderStatus = false,
+                        orderStatusError = result.safeStatusError(),
+                        newPreparationAllowed = false,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Clears only the active one-shot attempt after a terminal outcome.
+     * The append-only audit and the last tracked Alpaca lifecycle remain intact.
+     */
+    fun canResetForNewPreparation(): Boolean {
+        val current = _uiState.value
+        return current.lastResult != null && current.newPreparationAllowed &&
+            current.orderTrackingRestoreComplete && !current.untrackableSubmittedOrder &&
+            !current.sessionArmed && !current.isSubmitting && !current.isRefreshing &&
+            !current.isRefreshingOrderStatus
+    }
+
+    fun resetForNewPreparation(): Boolean {
+        val current = _uiState.value
+        if (!canResetForNewPreparation()) return false
+        tokenStore.invalidate()
+        confirmation = null
+        request = null
+        preflight = null
+        preview = null
+        disabledReadiness = null
+        priceSnapshot = null
+        account = null
+        accountRefreshedAt = null
+        clockSnapshot = null
+        clockRefreshedAt = null
+        reviewQueueMatch = false
+        _uiState.value = PaperManualSubmitUiState.initial(featureGate.compileTimeEnabled).copy(
+            realLocked = appState.realModeLocked,
+            trackedOrder = current.trackedOrder,
+            orderStatusSnapshot = current.orderStatusSnapshot,
+            orderStatusCheckedAtEpochMillis = current.orderStatusCheckedAtEpochMillis,
+            orderStatusError = current.orderStatusError,
+            newPreparationAllowed = current.newPreparationAllowed,
+            orderTrackingRestoreComplete = current.orderTrackingRestoreComplete,
+            untrackableSubmittedOrder = current.untrackableSubmittedOrder,
+        )
+        return true
+    }
+
+    private fun restoreLatestSubmittedOrder() {
+        viewModelScope.launch {
+            val restored = try {
+                orderStatusTrackerRepository.latestUnresolved()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _uiState.update { current ->
+                    if (current.orderTrackingRestoreComplete) current
+                    else current.copy(
+                        orderTrackingRestoreComplete = false,
+                        untrackableSubmittedOrder = true,
+                        orderStatusError =
+                            "Local Paper audit could not be restored; new attempts remain blocked.",
+                        newPreparationAllowed = false,
+                    )
+                }
+                return@launch
+            }
+            _uiState.update { current ->
+                if (current.orderTrackingRestoreComplete) return@update current
+                when (restored) {
+                    PaperOrderTrackingRestoreResult.None -> current.copy(
+                        orderTrackingRestoreComplete = true,
+                        untrackableSubmittedOrder = false,
+                        orderStatusError = null,
+                    )
+                    is PaperOrderTrackingRestoreResult.Trackable -> current.copy(
+                        trackedOrder = restored.order,
+                        orderStatusSnapshot = null,
+                        orderStatusCheckedAtEpochMillis = null,
+                        orderStatusError = null,
+                        newPreparationAllowed = false,
+                        orderTrackingRestoreComplete = true,
+                        untrackableSubmittedOrder = false,
+                    )
+                    is PaperOrderTrackingRestoreResult.Untrackable -> current.copy(
+                        trackedOrder = null,
+                        orderStatusSnapshot = null,
+                        orderStatusCheckedAtEpochMillis = null,
+                        orderStatusError =
+                            "The latest Paper attempt cannot be tracked safely. " +
+                                "New attempts remain blocked.",
+                        newPreparationAllowed = false,
+                        orderTrackingRestoreComplete = true,
+                        untrackableSubmittedOrder = true,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun hasUnresolvedTrackedOrder(): Boolean =
+        !_uiState.value.orderTrackingRestoreComplete ||
+            _uiState.value.untrackableSubmittedOrder ||
+            (_uiState.value.trackedOrder != null && !_uiState.value.newPreparationAllowed)
 
     private fun recomputeGate(nowEpochMillis: Long = clock().toEpochMilli()) {
         val decision = gate.evaluate(gateInput(nowEpochMillis))
@@ -353,6 +582,57 @@ private fun PaperOrderPayloadPreview.previewUnitPriceUsd(): Double? {
         return null
     }
     return (notional / quantity).takeIf { it.isFinite() && it > 0.0 }
+}
+
+private fun PaperOrderSubmitResult.toTrackedPaperOrder(
+    preview: PaperOrderPayloadPreview,
+): TrackedPaperOrder? {
+    val orderId = alpacaOrderId ?: return null
+    if (!AlpacaPaperOrderStatusEndpoint.isCanonicalOrderId(orderId)) return null
+    return TrackedPaperOrder(
+        orderId = orderId,
+        submitAttemptId = submitAttemptId,
+        previewId = previewId,
+        clientOrderId = clientOrderId,
+        symbol = preview.symbol,
+        side = preview.side.name,
+        quantity = preview.quantity,
+        submittedAtEpochMillis = submittedAtEpochMillis,
+    )
+}
+
+private fun PaperOrderSubmitResult.mayResetWithoutLifecycleLookup(): Boolean = when (status) {
+    PaperOrderSubmitStatus.BLOCKED,
+    PaperOrderSubmitStatus.REJECTED,
+    -> true
+    PaperOrderSubmitStatus.FAILED ->
+        errorCode == com.vela.android.lab.data.paper.submit.PaperOrderSubmitError.AUDIT_WRITE_FAILED
+    PaperOrderSubmitStatus.SUBMITTED -> false
+}
+
+private fun PaperOrderLifecycleStatus.allowsNewPreparation(): Boolean = when (this) {
+    PaperOrderLifecycleStatus.FILLED,
+    PaperOrderLifecycleStatus.CANCELED,
+    PaperOrderLifecycleStatus.EXPIRED,
+    PaperOrderLifecycleStatus.REJECTED,
+    -> true
+    else -> false
+}
+
+private fun AlpacaPaperOrderStatusReadOnlyClient.FetchResult.safeStatusError(): String = when (this) {
+    AlpacaPaperOrderStatusReadOnlyClient.FetchResult.AuthMissing ->
+        "Paper credentials are not configured."
+    AlpacaPaperOrderStatusReadOnlyClient.FetchResult.InvalidOrderId ->
+        "The tracked Paper order id is invalid."
+    is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.HttpError ->
+        "Alpaca Paper status lookup returned HTTP $statusCode."
+    AlpacaPaperOrderStatusReadOnlyClient.FetchResult.NetworkError ->
+        "Alpaca Paper status lookup failed on the network; no retry was attempted."
+    is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ParseError -> safeMessage
+    AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ResponseIdMismatch ->
+        "Alpaca Paper status response did not match the tracked order."
+    is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok ->
+        "Paper order status lookup completed."
 }
 
 private fun PaperManualSubmitUiState.withFinalPriceEvaluation(

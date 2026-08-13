@@ -23,6 +23,10 @@ import com.vela.android.lab.data.paper.OkHttpAlpacaHttpClient
 import com.vela.android.lab.data.paper.preflight.PaperOrderDryRunAuditRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreviewRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPreflightEngine
+import com.vela.android.lab.data.paper.status.AlpacaPaperOrderStatusHttpClient
+import com.vela.android.lab.data.paper.status.AlpacaPaperOrderStatusReadOnlyClient
+import com.vela.android.lab.data.paper.status.OkHttpAlpacaPaperOrderStatusHttpClient
+import com.vela.android.lab.data.paper.status.PaperOrderStatusTrackerRepository
 import com.vela.android.lab.data.paper.submit.AlpacaPaperOrderSubmitHttpClient
 import com.vela.android.lab.data.paper.submit.OkHttpAlpacaPaperOrderSubmitHttpClient
 import com.vela.android.lab.data.paper.submit.PaperManualExecutionFeatureGate
@@ -241,6 +245,19 @@ class VelaLabApplication : Application() {
         )
     }
 
+    // --- Manual, read-only lifecycle lookup for an already-submitted Paper order
+
+    private val alpacaPaperOrderStatusHttpClient: AlpacaPaperOrderStatusHttpClient by lazy {
+        OkHttpAlpacaPaperOrderStatusHttpClient()
+    }
+
+    val alpacaPaperOrderStatusReadOnlyClient: AlpacaPaperOrderStatusReadOnlyClient by lazy {
+        AlpacaPaperOrderStatusReadOnlyClient(
+            credentialsProvider = alpacaCredentialsProvider,
+            httpClient = alpacaPaperOrderStatusHttpClient,
+        )
+    }
+
     // --- Phase 2.v: default-off, one-shot manual Paper submit boundary
 
     val paperManualExecutionFeatureGate: PaperManualExecutionFeatureGate by lazy {
@@ -269,6 +286,10 @@ class VelaLabApplication : Application() {
 
     val paperOrderSubmitAuditRepository: PaperOrderSubmitAuditRepository by lazy {
         PaperOrderSubmitAuditRepository(database.paperOrderSubmitAuditDao())
+    }
+
+    val paperOrderStatusTrackerRepository: PaperOrderStatusTrackerRepository by lazy {
+        PaperOrderStatusTrackerRepository(paperOrderSubmitAuditRepository)
     }
 
     val paperManualSubmitExecutor: PaperManualSubmitExecutor by lazy {
