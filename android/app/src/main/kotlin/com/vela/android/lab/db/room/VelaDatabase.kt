@@ -11,16 +11,20 @@ import com.vela.android.lab.db.room.dao.JournalDao
 import com.vela.android.lab.db.room.dao.MarketBarDao
 import com.vela.android.lab.db.room.dao.PaperOrderDryRunAuditDao
 import com.vela.android.lab.db.room.dao.PaperOrderPayloadPreviewDao
+import com.vela.android.lab.db.room.dao.PaperOrderReconciliationDao
 import com.vela.android.lab.db.room.dao.PaperOrderSubmitAuditDao
 import com.vela.android.lab.db.room.dao.SignalDao
 import com.vela.android.lab.db.room.entities.JournalEventEntity
 import com.vela.android.lab.db.room.entities.MarketBar1mEntity
 import com.vela.android.lab.db.room.entities.PaperOrderDryRunAuditEntity
+import com.vela.android.lab.db.room.entities.PaperOrderLifecycleObservationEntity
 import com.vela.android.lab.db.room.entities.PaperOrderPayloadPreviewEntity
+import com.vela.android.lab.db.room.entities.PaperOrderReconciliationEntity
 import com.vela.android.lab.db.room.entities.PaperOrderSubmitAuditEntity
 import com.vela.android.lab.db.room.entities.SymbolFeaturesEntity
 import com.vela.android.lab.db.room.entities.SymbolSignalEntity
 import com.vela.android.lab.db.room.migrations.MIGRATION_4_5
+import com.vela.android.lab.db.room.migrations.MIGRATION_5_6
 
 /**
  * Phase 1.c Room database: the offline persistence foundation for
@@ -39,7 +43,7 @@ import com.vela.android.lab.db.room.migrations.MIGRATION_4_5
  * `app/schemas/com.vela.android.lab.db.room.VelaDatabase/1.json`.
  */
 @Database(
-    version = 5,
+    version = 6,
     exportSchema = true,
     entities = [
         MarketBar1mEntity::class,
@@ -49,6 +53,8 @@ import com.vela.android.lab.db.room.migrations.MIGRATION_4_5
         PaperOrderDryRunAuditEntity::class,
         PaperOrderPayloadPreviewEntity::class,
         PaperOrderSubmitAuditEntity::class,
+        PaperOrderReconciliationEntity::class,
+        PaperOrderLifecycleObservationEntity::class,
     ],
 )
 @TypeConverters(InstantConverter::class)
@@ -61,6 +67,7 @@ abstract class VelaDatabase : RoomDatabase() {
     abstract fun paperOrderDryRunAuditDao(): PaperOrderDryRunAuditDao
     abstract fun paperOrderPayloadPreviewDao(): PaperOrderPayloadPreviewDao
     abstract fun paperOrderSubmitAuditDao(): PaperOrderSubmitAuditDao
+    abstract fun paperOrderReconciliationDao(): PaperOrderReconciliationDao
 
     companion object {
         const val DATABASE_NAME: String = "vela-lab.db"
@@ -78,13 +85,15 @@ abstract class VelaDatabase : RoomDatabase() {
                 VelaDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_4_5)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
                 // Phase 2.q: dev-lab database; throwaway Phase 1.e
                 // bars / features / signals / journal rows are
                 // acceptable losses on schema bump. Watchlist + Paper
                 // credentials live in SharedPreferences / Keystore and
                 // survive the rebuild.
-                .fallbackToDestructiveMigration()
+                // Only pre-audit development schemas may still be discarded. Versions 4+
+                // must always migrate explicitly so submit/lifecycle evidence is preserved.
+                .fallbackToDestructiveMigrationFrom(1, 2, 3)
                 .build()
 
         /**

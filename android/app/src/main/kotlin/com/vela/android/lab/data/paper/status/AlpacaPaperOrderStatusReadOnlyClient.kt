@@ -13,7 +13,10 @@ class AlpacaPaperOrderStatusReadOnlyClient(
 ) {
 
     sealed interface FetchResult {
-        data class Ok(val value: PaperOrderStatusSnapshot) : FetchResult
+        data class Ok(
+            val value: PaperOrderStatusSnapshot,
+            val evidence: PaperOrderStatusFetchEvidence,
+        ) : FetchResult
         data object AuthMissing : FetchResult {
             override fun toString(): String = "AuthMissing"
         }
@@ -25,14 +28,14 @@ class AlpacaPaperOrderStatusReadOnlyClient(
             override fun toString(): String = "NetworkError"
         }
         data class ParseError(val safeMessage: String) : FetchResult
-        data object ResponseIdMismatch : FetchResult {
-            override fun toString(): String = "ResponseIdMismatch"
+        data object ResponseIdentityMismatch : FetchResult {
+            override fun toString(): String = "ResponseIdentityMismatch"
         }
     }
 
-    suspend fun fetchOrderStatus(orderId: String): FetchResult {
+    suspend fun fetchOrderStatus(target: PaperOrderLifecycleLookupTarget): FetchResult {
         val url = try {
-            AlpacaPaperOrderStatusEndpoint.urlFor(orderId)
+            AlpacaPaperOrderStatusEndpoint.urlFor(target.orderId)
         } catch (_: IllegalArgumentException) {
             return FetchResult.InvalidOrderId
         }
@@ -44,10 +47,13 @@ class AlpacaPaperOrderStatusReadOnlyClient(
         )) {
             is PaperOrderStatusHttpResult.Success -> when (val parsed = parser.parse(response.body)) {
                 is PaperOrderStatusJsonParser.ParseResult.Ok -> {
-                    if (parsed.value.orderId == orderId) {
-                        FetchResult.Ok(parsed.value)
+                    if (parsed.value.matches(target)) {
+                        FetchResult.Ok(
+                            value = parsed.value,
+                            evidence = PaperOrderStatusFetchEvidence(response.statusCode),
+                        )
                     } else {
-                        FetchResult.ResponseIdMismatch
+                        FetchResult.ResponseIdentityMismatch
                     }
                 }
                 is PaperOrderStatusJsonParser.ParseResult.Err ->
@@ -58,4 +64,14 @@ class AlpacaPaperOrderStatusReadOnlyClient(
             PaperOrderStatusHttpResult.NetworkError -> FetchResult.NetworkError
         }
     }
+
+    private fun PaperOrderStatusSnapshot.matches(
+        target: PaperOrderLifecycleLookupTarget,
+    ): Boolean = orderId == target.orderId &&
+        clientOrderId == target.clientOrderId &&
+        symbol == target.symbol &&
+        side == target.side &&
+        quantity == target.quantity &&
+        orderType == target.orderType &&
+        timeInForce == target.timeInForce
 }

@@ -1,100 +1,680 @@
 package com.vela.android.lab.data.paper.status
 
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitAuditRepository
+import com.vela.android.lab.db.room.dao.PaperOrderReconciliationDao
+import com.vela.android.lab.db.room.entities.PaperOrderLifecycleObservationEntity
+import com.vela.android.lab.db.room.entities.PaperOrderReconciliationEntity
 import com.vela.android.lab.db.room.entities.PaperOrderSubmitAuditEntity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
-/** Safe reference to a previously submitted Paper order, reconstructed from local audit. */
-data class TrackedPaperOrder(
+enum class PaperOrderReconciliationVerdict {
+    CLEAR,
+    READY,
+    SINGLE_UNRESOLVED,
+    MULTIPLE_UNRESOLVED_PAPER_ORDERS,
+    TERMINAL_RESET_REQUIRED,
+    AMBIGUOUS,
+}
+
+enum class PaperOrderReconciliationIssue {
+    LOCAL_AUDIT_INCOMPLETE,
+    LOCAL_AUDIT_CONFLICT,
+    UNKNOWN_LOCAL_RESULT,
+    AMBIGUOUS_LOCAL_FAILURE,
+    INVALID_ALPACA_ORDER_ID,
+    DUPLICATE_ALPACA_ORDER_ID,
+    DUPLICATE_CLIENT_ORDER_ID,
+    LIFECYCLE_IDENTITY_MISMATCH,
+    LIFECYCLE_CONTRADICTION,
+    MULTIPLE_UNRESOLVED_PAPER_ORDERS,
+    TERMINAL_RESET_REQUIRED,
+    RESPONSE_IDENTITY_MISMATCH,
+    PERSISTENCE_FAILED,
+}
+
+data class PaperOrderLifecycleObservation(
+    val id: Long,
+    val status: String,
+    val rawStatus: String,
+    val observedAtEpochMillis: Long,
+    val terminal: Boolean,
+    val filledQuantity: Double?,
+    val filledAveragePriceUsd: Double?,
+    val filledAtIso: String?,
+    val source: String,
+    val httpStatusCode: Int?,
+)
+
+data class ReconciledPaperOrder(
+    val submitAttemptId: String,
+    val attemptStartedAuditEntryId: Long?,
+    val submitResultAuditEntryId: Long?,
+    val previewId: String?,
+    val linkedClientDryRunId: String?,
+    val orderId: String?,
+    val clientOrderId: String?,
+    val symbol: String?,
+    val side: String?,
+    val quantity: Double?,
+    val orderType: String?,
+    val timeInForce: String?,
+    val submittedAtEpochMillis: Long?,
+    val localSubmitResult: String?,
+    val mappingExact: Boolean,
+    val issues: Set<PaperOrderReconciliationIssue>,
+    val lifecycleHistory: List<PaperOrderLifecycleObservation>,
+    val latestLifecycleSnapshot: PaperOrderStatusSnapshot?,
+    val lifecycleObservedAtEpochMillis: Long?,
+    val terminal: Boolean,
+    val resetAcknowledgedAtEpochMillis: Long?,
+) {
+    val unresolvedRemoteOrder: Boolean
+        get() = mappingExact && localSubmitResult == "SUBMITTED" && !terminal
+
+    val terminalResetRequired: Boolean
+        get() = mappingExact && localSubmitResult == "SUBMITTED" && terminal &&
+            resetAcknowledgedAtEpochMillis == null
+}
+
+data class PaperOrderReconciliationSnapshot(
+    val verdict: PaperOrderReconciliationVerdict,
+    val candidates: List<ReconciledPaperOrder>,
+    val issues: Set<PaperOrderReconciliationIssue>,
+) {
+    val preparationAllowed: Boolean
+        get() = verdict == PaperOrderReconciliationVerdict.CLEAR ||
+            verdict == PaperOrderReconciliationVerdict.READY
+
+    val resetEligibleAttemptIds: List<String>
+        get() = if (verdict == PaperOrderReconciliationVerdict.TERMINAL_RESET_REQUIRED) {
+            candidates.filter(ReconciledPaperOrder::terminalResetRequired)
+                .map(ReconciledPaperOrder::submitAttemptId)
+        } else {
+            emptyList()
+        }
+}
+
+data class PaperOrderLifecycleLookupTarget(
+    val submitAttemptId: String,
+    val submitResultAuditEntryId: Long,
     val orderId: String,
-    val submitAttemptId: String,
-    val previewId: String,
     val clientOrderId: String,
     val symbol: String,
     val side: String,
     val quantity: Double,
-    val submittedAtEpochMillis: Long,
+    val orderType: String,
+    val timeInForce: String,
 )
 
-data class UntrackablePaperSubmission(
-    val submitAttemptId: String,
-    val previewId: String,
-    val clientOrderId: String,
-    val symbol: String,
-    val side: String,
-    val quantity: Double,
-    val submittedAtEpochMillis: Long,
-    val auditStatus: String,
-)
+sealed interface PaperOrderLifecycleLookupResult {
+    data class Exact(val target: PaperOrderLifecycleLookupTarget) :
+        PaperOrderLifecycleLookupResult
 
-sealed interface PaperOrderTrackingRestoreResult {
-    data object None : PaperOrderTrackingRestoreResult
-    data class Trackable(val order: TrackedPaperOrder) : PaperOrderTrackingRestoreResult
-    data class Untrackable(
-        val submission: UntrackablePaperSubmission,
-    ) : PaperOrderTrackingRestoreResult
+    data class Blocked(
+        val verdict: PaperOrderReconciliationVerdict,
+        val issues: Set<PaperOrderReconciliationIssue>,
+    ) : PaperOrderLifecycleLookupResult
 }
 
-fun interface PaperOrderTrackingSource {
-    suspend fun latestUnresolved(): PaperOrderTrackingRestoreResult
+sealed interface PaperOrderLifecyclePersistResult {
+    data class Persisted(val snapshot: PaperOrderReconciliationSnapshot) :
+        PaperOrderLifecyclePersistResult
+
+    data class Blocked(
+        val snapshot: PaperOrderReconciliationSnapshot,
+        val issues: Set<PaperOrderReconciliationIssue>,
+    ) : PaperOrderLifecyclePersistResult
 }
 
-/** Read-only bridge from the append-only submit audit into lifecycle tracking. */
+sealed interface PaperOrderResetAcknowledgementResult {
+    data class Acknowledged(val snapshot: PaperOrderReconciliationSnapshot) :
+        PaperOrderResetAcknowledgementResult
+
+    data class Blocked(val snapshot: PaperOrderReconciliationSnapshot) :
+        PaperOrderResetAcknowledgementResult
+}
+
+interface PaperOrderTrackingSource {
+    suspend fun consolidateFromAudit(): PaperOrderReconciliationSnapshot
+
+    suspend fun lookupTarget(): PaperOrderLifecycleLookupResult
+
+    suspend fun persistLifecycle(
+        target: PaperOrderLifecycleLookupTarget,
+        status: PaperOrderStatusSnapshot,
+        evidence: PaperOrderStatusFetchEvidence,
+        observedAtEpochMillis: Long,
+    ): PaperOrderLifecyclePersistResult
+
+    suspend fun acknowledgeTerminalReset(
+        submitAttemptId: String,
+        acknowledgedAtEpochMillis: Long,
+    ): PaperOrderResetAcknowledgementResult
+}
+
+/**
+ * Persistent read-only reconciliation. It enumerates all attempts and never selects by time.
+ * Lifecycle evidence is committed before it can unlock foreground state.
+ */
 class PaperOrderStatusTrackerRepository(
     private val auditRepository: PaperOrderSubmitAuditRepository,
+    private val reconciliationDao: PaperOrderReconciliationDao,
 ) : PaperOrderTrackingSource {
-    override suspend fun latestUnresolved(): PaperOrderTrackingRestoreResult {
-        val latestByAttempt = auditRepository.recent(RECENT_AUDIT_LIMIT)
-            .groupBy(PaperOrderSubmitAuditEntity::submitAttemptId)
-            .values
-            .mapNotNull { events ->
-                events.maxByOrNull(PaperOrderSubmitAuditEntity::id)
-            }
-            .sortedByDescending(PaperOrderSubmitAuditEntity::id)
-        for (row in latestByAttempt) {
-            when (row.status) {
-                BLOCKED, REJECTED -> continue
-                SUBMITTED -> {
-                    val orderId = row.alpacaOrderId
-                    if (orderId != null &&
-                        AlpacaPaperOrderStatusEndpoint.isCanonicalOrderId(orderId)
-                    ) {
-                        return PaperOrderTrackingRestoreResult.Trackable(
-                            TrackedPaperOrder(
-                                orderId = orderId,
-                                submitAttemptId = row.submitAttemptId,
-                                previewId = row.previewId,
-                                clientOrderId = row.clientOrderId,
-                                symbol = row.symbol,
-                                side = row.side,
-                                quantity = row.quantity,
-                                submittedAtEpochMillis = row.submittedAtEpochMillis,
-                            ),
-                        )
-                    }
-                    return PaperOrderTrackingRestoreResult.Untrackable(row.toUntrackable())
-                }
-                else -> return PaperOrderTrackingRestoreResult.Untrackable(row.toUntrackable())
-            }
-        }
-        return PaperOrderTrackingRestoreResult.None
+    private val mutex = Mutex()
+
+    override suspend fun consolidateFromAudit(): PaperOrderReconciliationSnapshot =
+        mutex.withLock { consolidateLocked() }
+
+    override suspend fun lookupTarget(): PaperOrderLifecycleLookupResult = mutex.withLock {
+        lookupTarget(consolidateLocked())
     }
 
-    private fun PaperOrderSubmitAuditEntity.toUntrackable(): UntrackablePaperSubmission =
-        UntrackablePaperSubmission(
+    override suspend fun persistLifecycle(
+        target: PaperOrderLifecycleLookupTarget,
+        status: PaperOrderStatusSnapshot,
+        evidence: PaperOrderStatusFetchEvidence,
+        observedAtEpochMillis: Long,
+    ): PaperOrderLifecyclePersistResult = mutex.withLock {
+        val before = consolidateLocked()
+        val currentTarget = (lookupTarget(before) as? PaperOrderLifecycleLookupResult.Exact)?.target
+        if (currentTarget != target || !status.matches(target)) {
+            return@withLock PaperOrderLifecyclePersistResult.Blocked(
+                before,
+                setOf(PaperOrderReconciliationIssue.RESPONSE_IDENTITY_MISMATCH),
+            )
+        }
+        val current = reconciliationDao.reconciliationByAttemptId(target.submitAttemptId)
+            ?: return@withLock PaperOrderLifecyclePersistResult.Blocked(
+                before,
+                setOf(PaperOrderReconciliationIssue.PERSISTENCE_FAILED),
+            )
+        val history = reconciliationDao.lifecycleByAttemptId(target.submitAttemptId)
+        val observation = PaperOrderLifecycleObservationEntity(
+            observationKey = lifecycleObservationKey(
+                target,
+                observedAtEpochMillis,
+                history.size,
+                status.rawStatus,
+            ),
+            submitAttemptId = target.submitAttemptId,
+            alpacaOrderId = target.orderId,
+            status = status.status.name,
+            rawStatus = status.rawStatus,
+            observedAtEpochMillis = observedAtEpochMillis,
+            terminal = status.terminalForNewPreparation,
+            filledQuantity = status.filledQuantity,
+            filledAveragePriceUsd = status.filledAveragePriceUsd,
+            filledAtIso = status.filledAtIso,
+            source = evidence.source,
+            httpStatusCode = evidence.httpStatusCode,
+            submitAuditEntryId = target.submitResultAuditEntryId,
+        )
+        val updated = current.copy(
+            latestLifecycleStatus = status.status.name,
+            latestLifecycleRawStatus = status.rawStatus,
+            latestLifecycleObservedAtEpochMillis = observedAtEpochMillis,
+            terminal = status.terminalForNewPreparation,
+            filledQuantity = status.filledQuantity,
+            filledAveragePriceUsd = status.filledAveragePriceUsd,
+            filledAtIso = status.filledAtIso,
+            lifecycleSource = evidence.source,
+            lifecycleHttpStatusCode = evidence.httpStatusCode,
+        )
+        try {
+            reconciliationDao.appendLifecycleObservation(observation, updated)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return@withLock PaperOrderLifecyclePersistResult.Blocked(
+                before,
+                setOf(PaperOrderReconciliationIssue.PERSISTENCE_FAILED),
+            )
+        }
+        PaperOrderLifecyclePersistResult.Persisted(buildSnapshotLocked())
+    }
+
+    override suspend fun acknowledgeTerminalReset(
+        submitAttemptId: String,
+        acknowledgedAtEpochMillis: Long,
+    ): PaperOrderResetAcknowledgementResult = mutex.withLock {
+        require(acknowledgedAtEpochMillis >= 0L)
+        val before = consolidateLocked()
+        if (submitAttemptId !in before.resetEligibleAttemptIds) {
+            return@withLock PaperOrderResetAcknowledgementResult.Blocked(before)
+        }
+        val updated = try {
+            reconciliationDao.acknowledgeReset(submitAttemptId, acknowledgedAtEpochMillis)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            0
+        }
+        if (updated == 1) {
+            PaperOrderResetAcknowledgementResult.Acknowledged(buildSnapshotLocked())
+        } else {
+            PaperOrderResetAcknowledgementResult.Blocked(before)
+        }
+    }
+
+    private suspend fun consolidateLocked(): PaperOrderReconciliationSnapshot {
+        val rows = auditRepository.recent(Int.MAX_VALUE).sortedBy(PaperOrderSubmitAuditEntity::id)
+        val existing = reconciliationDao.allReconciliations()
+            .associateBy(PaperOrderReconciliationEntity::submitAttemptId)
+        val derived = rows.groupBy(PaperOrderSubmitAuditEntity::submitAttemptId)
+            .toSortedMap()
+            .mapValues { (attemptId, events) ->
+                deriveIdentity(attemptId, events, existing[attemptId])
+            }
+            .toMutableMap()
+        applyGlobalDuplicateIssues(derived)
+        derived.values.forEach { entity ->
+            val stored = existing[entity.submitAttemptId]
+            if (stored == null) {
+                reconciliationDao.insertReconciliationIfAbsent(entity)
+            } else if (stored != entity) {
+                reconciliationDao.updateReconciliation(entity)
+            }
+        }
+        appendMissingLocalSubmittedObservations()
+        return buildSnapshotLocked()
+    }
+
+    private suspend fun appendMissingLocalSubmittedObservations() {
+        reconciliationDao.allReconciliations().forEach { entity ->
+            if (entity.mappingStatus != MAPPING_EXACT || entity.localSubmitResult != SUBMITTED) {
+                return@forEach
+            }
+            val orderId = entity.alpacaOrderId ?: return@forEach
+            val auditEntryId = entity.submitResultAuditEntryId ?: return@forEach
+            val submittedAt = entity.submittedAtEpochMillis ?: return@forEach
+            if (reconciliationDao.lifecycleByAttemptId(entity.submitAttemptId).isNotEmpty()) {
+                return@forEach
+            }
+            val observation = PaperOrderLifecycleObservationEntity(
+                observationKey = "LOCAL_SUBMIT:" + entity.submitAttemptId + ":$auditEntryId",
+                submitAttemptId = entity.submitAttemptId,
+                alpacaOrderId = orderId,
+                status = SUBMITTED,
+                rawStatus = "submitted",
+                observedAtEpochMillis = submittedAt,
+                terminal = false,
+                filledQuantity = 0.0,
+                filledAveragePriceUsd = null,
+                filledAtIso = null,
+                source = LOCAL_SUBMIT_AUDIT,
+                httpStatusCode = null,
+                submitAuditEntryId = auditEntryId,
+            )
+            reconciliationDao.appendLifecycleObservation(
+                observation,
+                entity.copy(
+                    latestLifecycleStatus = SUBMITTED,
+                    latestLifecycleRawStatus = "submitted",
+                    latestLifecycleObservedAtEpochMillis = submittedAt,
+                    terminal = false,
+                    filledQuantity = 0.0,
+                    lifecycleSource = LOCAL_SUBMIT_AUDIT,
+                    lifecycleHttpStatusCode = null,
+                ),
+            )
+        }
+    }
+
+    private fun deriveIdentity(
+        attemptId: String,
+        rows: List<PaperOrderSubmitAuditEntity>,
+        previous: PaperOrderReconciliationEntity?,
+    ): PaperOrderReconciliationEntity {
+        val starts = rows.filter { it.status == ATTEMPT_STARTED }
+        val results = rows.filter { it.status != ATTEMPT_STARTED }
+        val issues = linkedSetOf<PaperOrderReconciliationIssue>()
+        if (starts.size > 1 || results.size > 1 || rows.any { !it.eventKeyMatches() }) {
+            issues += PaperOrderReconciliationIssue.LOCAL_AUDIT_CONFLICT
+        }
+        if (results.isEmpty()) issues += PaperOrderReconciliationIssue.LOCAL_AUDIT_INCOMPLETE
+        val result = results.singleOrNull()
+        if (result != null && result.status !in KNOWN_LOCAL_RESULTS) {
+            issues += PaperOrderReconciliationIssue.UNKNOWN_LOCAL_RESULT
+        }
+        if (result?.status == FAILED) {
+            issues += PaperOrderReconciliationIssue.AMBIGUOUS_LOCAL_FAILURE
+        }
+        if (result?.status == SUBMITTED &&
+            result.alpacaOrderId?.let(AlpacaPaperOrderStatusEndpoint::isCanonicalOrderId) != true
+        ) {
+            issues += PaperOrderReconciliationIssue.INVALID_ALPACA_ORDER_ID
+        }
+        if (result?.status in setOf(SUBMITTED, REJECTED, FAILED) && starts.size != 1) {
+            issues += PaperOrderReconciliationIssue.LOCAL_AUDIT_INCOMPLETE
+        }
+        if (!rows.haveConsistentIdentity()) {
+            issues += PaperOrderReconciliationIssue.LOCAL_AUDIT_CONFLICT
+        }
+        val evidence = rows.firstOrNull()
+        return PaperOrderReconciliationEntity(
+            submitAttemptId = attemptId,
+            attemptStartedAuditEntryId = starts.singleOrNull()?.id,
+            submitResultAuditEntryId = result?.id,
+            previewId = evidence?.previewId.takeIf { rows.sameValue { it.previewId } },
+            linkedClientDryRunId =
+                evidence?.linkedClientDryRunId.takeIf { rows.sameValue { it.linkedClientDryRunId } },
+            alpacaOrderId = result?.alpacaOrderId,
+            clientOrderId = evidence?.clientOrderId.takeIf { rows.sameValue { it.clientOrderId } },
+            symbol = evidence?.symbol.takeIf { rows.sameValue { it.symbol } },
+            side = evidence?.side.takeIf { rows.sameValue { it.side } },
+            quantity = evidence?.quantity.takeIf { rows.sameValue { it.quantity } },
+            orderType = evidence?.orderType.takeIf { rows.sameValue { it.orderType } },
+            timeInForce = evidence?.timeInForce.takeIf { rows.sameValue { it.timeInForce } },
+            limitPriceUsd = evidence?.limitPriceUsd.takeIf { rows.sameValue { it.limitPriceUsd } },
+            submittedAtEpochMillis = result?.submittedAtEpochMillis,
+            localSubmitResult = result?.status,
+            mappingStatus = if (issues.isEmpty()) MAPPING_EXACT else MAPPING_AMBIGUOUS,
+            mappingDiagnostic = issues.toDiagnostic(),
+            latestLifecycleStatus = previous?.latestLifecycleStatus,
+            latestLifecycleRawStatus = previous?.latestLifecycleRawStatus,
+            latestLifecycleObservedAtEpochMillis = previous?.latestLifecycleObservedAtEpochMillis,
+            terminal = previous?.terminal ?: false,
+            filledQuantity = previous?.filledQuantity,
+            filledAveragePriceUsd = previous?.filledAveragePriceUsd,
+            filledAtIso = previous?.filledAtIso,
+            lifecycleSource = previous?.lifecycleSource,
+            lifecycleHttpStatusCode = previous?.lifecycleHttpStatusCode,
+            resetAcknowledgedAtEpochMillis = previous?.resetAcknowledgedAtEpochMillis,
+        )
+    }
+
+    private fun applyGlobalDuplicateIssues(
+        entities: MutableMap<String, PaperOrderReconciliationEntity>,
+    ) {
+        markDuplicates(
+            entities,
+            PaperOrderReconciliationEntity::alpacaOrderId,
+            PaperOrderReconciliationIssue.DUPLICATE_ALPACA_ORDER_ID,
+        )
+        markDuplicates(
+            entities,
+            PaperOrderReconciliationEntity::clientOrderId,
+            PaperOrderReconciliationIssue.DUPLICATE_CLIENT_ORDER_ID,
+        )
+    }
+
+    private fun markDuplicates(
+        entities: MutableMap<String, PaperOrderReconciliationEntity>,
+        key: (PaperOrderReconciliationEntity) -> String?,
+        issue: PaperOrderReconciliationIssue,
+    ) {
+        entities.values.groupBy(key)
+            .filterKeys { !it.isNullOrBlank() }
+            .values
+            .filter { rows ->
+                rows.map(PaperOrderReconciliationEntity::submitAttemptId).distinct().size > 1
+            }
+            .flatten()
+            .forEach { duplicate ->
+                val issues = duplicate.mappingDiagnostic.toIssues() + issue
+                entities[duplicate.submitAttemptId] = duplicate.copy(
+                    mappingStatus = MAPPING_AMBIGUOUS,
+                    mappingDiagnostic = issues.toDiagnostic(),
+                )
+            }
+    }
+
+    private suspend fun buildSnapshotLocked(): PaperOrderReconciliationSnapshot {
+        val candidates = reconciliationDao.allReconciliations().map { entity ->
+            val history = reconciliationDao.lifecycleByAttemptId(entity.submitAttemptId)
+            val issues = entity.mappingDiagnostic.toIssues() + lifecycleIssues(entity, history)
+            val latestGet = history.lastOrNull {
+                it.source == PaperOrderStatusFetchEvidence.SOURCE
+            }
+            val latestValidatedSnapshot = latestGet?.validatedSnapshot(entity)
+            ReconciledPaperOrder(
+                submitAttemptId = entity.submitAttemptId,
+                attemptStartedAuditEntryId = entity.attemptStartedAuditEntryId,
+                submitResultAuditEntryId = entity.submitResultAuditEntryId,
+                previewId = entity.previewId,
+                linkedClientDryRunId = entity.linkedClientDryRunId,
+                orderId = entity.alpacaOrderId,
+                clientOrderId = entity.clientOrderId,
+                symbol = entity.symbol,
+                side = entity.side,
+                quantity = entity.quantity,
+                orderType = entity.orderType,
+                timeInForce = entity.timeInForce,
+                submittedAtEpochMillis = entity.submittedAtEpochMillis,
+                localSubmitResult = entity.localSubmitResult,
+                mappingExact = entity.mappingStatus == MAPPING_EXACT && issues.isEmpty(),
+                issues = issues,
+                lifecycleHistory = history.map { it.toDomain() },
+                latestLifecycleSnapshot = latestValidatedSnapshot,
+                lifecycleObservedAtEpochMillis = latestGet?.observedAtEpochMillis
+                    ?.takeIf { latestValidatedSnapshot != null },
+                terminal = latestValidatedSnapshot?.terminalForNewPreparation == true,
+                resetAcknowledgedAtEpochMillis = entity.resetAcknowledgedAtEpochMillis,
+            )
+        }
+        val ambiguous = candidates.flatMap(ReconciledPaperOrder::issues).toSet()
+        val unresolved = candidates.filter(ReconciledPaperOrder::unresolvedRemoteOrder)
+        val resetRequired = candidates.filter(ReconciledPaperOrder::terminalResetRequired)
+        val verdict = when {
+            candidates.isEmpty() -> PaperOrderReconciliationVerdict.CLEAR
+            ambiguous.isNotEmpty() -> PaperOrderReconciliationVerdict.AMBIGUOUS
+            unresolved.size > 1 ->
+                PaperOrderReconciliationVerdict.MULTIPLE_UNRESOLVED_PAPER_ORDERS
+            unresolved.size == 1 -> PaperOrderReconciliationVerdict.SINGLE_UNRESOLVED
+            resetRequired.isNotEmpty() ->
+                PaperOrderReconciliationVerdict.TERMINAL_RESET_REQUIRED
+            else -> PaperOrderReconciliationVerdict.READY
+        }
+        val issues = ambiguous.toMutableSet()
+        if (verdict == PaperOrderReconciliationVerdict.MULTIPLE_UNRESOLVED_PAPER_ORDERS) {
+            issues += PaperOrderReconciliationIssue.MULTIPLE_UNRESOLVED_PAPER_ORDERS
+        }
+        if (verdict == PaperOrderReconciliationVerdict.TERMINAL_RESET_REQUIRED) {
+            issues += PaperOrderReconciliationIssue.TERMINAL_RESET_REQUIRED
+        }
+        return PaperOrderReconciliationSnapshot(verdict, candidates, issues)
+    }
+
+    private fun lookupTarget(
+        snapshot: PaperOrderReconciliationSnapshot,
+    ): PaperOrderLifecycleLookupResult {
+        val candidate = snapshot.candidates.singleOrNull(ReconciledPaperOrder::unresolvedRemoteOrder)
+        if (snapshot.verdict != PaperOrderReconciliationVerdict.SINGLE_UNRESOLVED ||
+            candidate == null || !candidate.mappingExact
+        ) {
+            return PaperOrderLifecycleLookupResult.Blocked(snapshot.verdict, snapshot.issues)
+        }
+        val target = candidate.toLookupTarget()
+            ?: return PaperOrderLifecycleLookupResult.Blocked(
+                PaperOrderReconciliationVerdict.AMBIGUOUS,
+                setOf(PaperOrderReconciliationIssue.LOCAL_AUDIT_INCOMPLETE),
+            )
+        return PaperOrderLifecycleLookupResult.Exact(target)
+    }
+
+    private fun lifecycleIssues(
+        entity: PaperOrderReconciliationEntity,
+        history: List<PaperOrderLifecycleObservationEntity>,
+    ): Set<PaperOrderReconciliationIssue> {
+        val issues = linkedSetOf<PaperOrderReconciliationIssue>()
+        if (history.any {
+                it.submitAttemptId != entity.submitAttemptId ||
+                    it.alpacaOrderId != entity.alpacaOrderId ||
+                    it.submitAuditEntryId != entity.submitResultAuditEntryId
+            }
+        ) {
+            issues += PaperOrderReconciliationIssue.LIFECYCLE_IDENTITY_MISMATCH
+        }
+        if (history.asSequence()
+                .filter { it.source == PaperOrderStatusFetchEvidence.SOURCE }
+                .any { it.toCoherentSnapshot(entity) == null }
+        ) {
+            issues += PaperOrderReconciliationIssue.LIFECYCLE_CONTRADICTION
+        }
+        val terminals = history.filter(PaperOrderLifecycleObservationEntity::terminal)
+        if (terminals.map(PaperOrderLifecycleObservationEntity::rawStatus).distinct().size > 1) {
+            issues += PaperOrderReconciliationIssue.LIFECYCLE_CONTRADICTION
+        }
+        val terminalIndex = history.indexOfFirst(PaperOrderLifecycleObservationEntity::terminal)
+        if (terminalIndex >= 0) {
+            val terminal = history[terminalIndex]
+            if (history.drop(terminalIndex + 1).any {
+                    it.rawStatus != terminal.rawStatus ||
+                        it.filledQuantity != terminal.filledQuantity ||
+                        it.filledAveragePriceUsd != terminal.filledAveragePriceUsd ||
+                        it.filledAtIso != terminal.filledAtIso
+                }
+            ) {
+                issues += PaperOrderReconciliationIssue.LIFECYCLE_CONTRADICTION
+            }
+        }
+        val filled = history.mapNotNull(PaperOrderLifecycleObservationEntity::filledQuantity)
+        if (filled.zipWithNext().any { (before, after) -> after < before }) {
+            issues += PaperOrderReconciliationIssue.LIFECYCLE_CONTRADICTION
+        }
+        return issues
+    }
+
+    private fun PaperOrderStatusSnapshot.matches(target: PaperOrderLifecycleLookupTarget): Boolean =
+        orderId == target.orderId &&
+            clientOrderId == target.clientOrderId &&
+            symbol == target.symbol &&
+            side == target.side &&
+            quantity == target.quantity &&
+            orderType == target.orderType &&
+            timeInForce == target.timeInForce
+
+    private fun ReconciledPaperOrder.toLookupTarget(): PaperOrderLifecycleLookupTarget? {
+        val resultAuditEntryId = submitResultAuditEntryId ?: return null
+        val canonicalOrderId =
+            orderId?.takeIf(AlpacaPaperOrderStatusEndpoint::isCanonicalOrderId) ?: return null
+        return PaperOrderLifecycleLookupTarget(
             submitAttemptId = submitAttemptId,
-            previewId = previewId,
-            clientOrderId = clientOrderId,
-            symbol = symbol,
-            side = side,
-            quantity = quantity,
-            submittedAtEpochMillis = submittedAtEpochMillis,
-            auditStatus = status,
+            submitResultAuditEntryId = resultAuditEntryId,
+            orderId = canonicalOrderId,
+            clientOrderId = clientOrderId ?: return null,
+            symbol = symbol ?: return null,
+            side = side ?: return null,
+            quantity = quantity ?: return null,
+            orderType = orderType ?: return null,
+            timeInForce = timeInForce ?: return null,
+        )
+    }
+
+    private fun PaperOrderLifecycleObservationEntity.toDomain(): PaperOrderLifecycleObservation =
+        PaperOrderLifecycleObservation(
+            id,
+            status,
+            rawStatus,
+            observedAtEpochMillis,
+            terminal,
+            filledQuantity,
+            filledAveragePriceUsd,
+            filledAtIso,
+            source,
+            httpStatusCode,
         )
 
+    private fun PaperOrderLifecycleObservationEntity.toSnapshot(
+        identity: PaperOrderReconciliationEntity,
+    ): PaperOrderStatusSnapshot? {
+        val lifecycle = runCatching { PaperOrderLifecycleStatus.valueOf(status) }.getOrNull()
+            ?: return null
+        return runCatching {
+            PaperOrderStatusSnapshot(
+                orderId = alpacaOrderId,
+                clientOrderId = identity.clientOrderId ?: return null,
+                symbol = identity.symbol ?: return null,
+                side = identity.side ?: return null,
+                quantity = identity.quantity ?: return null,
+                orderType = identity.orderType ?: return null,
+                timeInForce = identity.timeInForce ?: return null,
+                status = lifecycle,
+                rawStatus = rawStatus,
+                filledQuantity = filledQuantity ?: return null,
+                filledAveragePriceUsd = filledAveragePriceUsd,
+                filledAtIso = filledAtIso,
+            )
+        }.getOrNull()
+    }
+
+    private fun PaperOrderLifecycleObservationEntity.matchesLifecycleIdentity(
+        identity: PaperOrderReconciliationEntity,
+    ): Boolean = submitAttemptId == identity.submitAttemptId &&
+        alpacaOrderId == identity.alpacaOrderId &&
+        submitAuditEntryId == identity.submitResultAuditEntryId
+
+    private fun PaperOrderLifecycleObservationEntity.toCoherentSnapshot(
+        identity: PaperOrderReconciliationEntity,
+    ): PaperOrderStatusSnapshot? {
+        val snapshot = toSnapshot(identity) ?: return null
+        return snapshot.takeIf {
+            source == PaperOrderStatusFetchEvidence.SOURCE &&
+                httpStatusCode != null &&
+                httpStatusCode in 200..299 &&
+                status == snapshot.status.name &&
+                PaperOrderLifecycleStatus.fromWireValue(rawStatus) == snapshot.status &&
+                terminal == snapshot.terminalForNewPreparation
+        }
+    }
+
+    private fun PaperOrderLifecycleObservationEntity.validatedSnapshot(
+        identity: PaperOrderReconciliationEntity,
+    ): PaperOrderStatusSnapshot? = takeIf { matchesLifecycleIdentity(identity) }
+        ?.toCoherentSnapshot(identity)
+
+    private fun PaperOrderSubmitAuditEntity.eventKeyMatches(): Boolean =
+        eventKey == "$submitAttemptId:$status"
+
+    private fun List<PaperOrderSubmitAuditEntity>.haveConsistentIdentity(): Boolean =
+        sameValue { it.previewId } &&
+            sameValue { it.linkedClientDryRunId } &&
+            sameValue { it.clientOrderId } &&
+            sameValue { it.symbol } &&
+            sameValue { it.side } &&
+            sameValue { it.quantity } &&
+            sameValue { it.orderType } &&
+            sameValue { it.timeInForce } &&
+            sameValue { it.limitPriceUsd }
+
+    private fun <T> List<PaperOrderSubmitAuditEntity>.sameValue(
+        value: (PaperOrderSubmitAuditEntity) -> T,
+    ): Boolean = map(value).distinct().size <= 1
+
+    private fun String?.toIssues(): Set<PaperOrderReconciliationIssue> =
+        this?.split(',')
+            ?.mapNotNull { raw ->
+                runCatching { PaperOrderReconciliationIssue.valueOf(raw) }.getOrNull()
+            }
+            ?.toSet()
+            .orEmpty()
+
+    private fun Set<PaperOrderReconciliationIssue>.toDiagnostic(): String? =
+        takeIf(Set<PaperOrderReconciliationIssue>::isNotEmpty)
+            ?.map(PaperOrderReconciliationIssue::name)
+            ?.sorted()
+            ?.joinToString(",")
+
+    private fun lifecycleObservationKey(
+        target: PaperOrderLifecycleLookupTarget,
+        observedAtEpochMillis: Long,
+        priorCount: Int,
+        rawStatus: String,
+    ): String = "GET:" + target.submitAttemptId + ":" +
+        target.submitResultAuditEntryId + ":$observedAtEpochMillis:$priorCount:$rawStatus"
+
     companion object {
-        private const val BLOCKED: String = "BLOCKED"
-        private const val REJECTED: String = "REJECTED"
+        private const val MAPPING_EXACT: String = "EXACT"
+        private const val MAPPING_AMBIGUOUS: String = "AMBIGUOUS"
+        private const val ATTEMPT_STARTED: String = "ATTEMPT_STARTED"
         private const val SUBMITTED: String = "SUBMITTED"
-        private const val RECENT_AUDIT_LIMIT: Int = Int.MAX_VALUE
+        private const val REJECTED: String = "REJECTED"
+        private const val FAILED: String = "FAILED"
+        private const val BLOCKED: String = "BLOCKED"
+        private const val LOCAL_SUBMIT_AUDIT: String = "LOCAL_SUBMIT_AUDIT"
+        private val KNOWN_LOCAL_RESULTS: Set<String> =
+            setOf(SUBMITTED, REJECTED, FAILED, BLOCKED)
     }
 }

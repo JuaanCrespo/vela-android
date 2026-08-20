@@ -141,19 +141,39 @@ class Ux2UiSafetyContractTest {
             "Consultar estado Alpaca · solo GET",
             "Preparar otra orden Paper",
             "Estado VELA",
-            "Estado Alpaca",
+            "Attempt audit row",
+            "Result audit row",
+            "Lifecycle observations",
+            "MULTIPLE_UNRESOLVED_PAPER_ORDERS",
             "paperManualSubmitViewModel?.refreshOrderStatus()",
             "paperManualSubmitViewModel?.canResetForNewPreparation() == true",
             "paperOrderPreflightViewModel?.canResetForNewPreparation() == true",
-            "paperOrderPreflightViewModel?.resetForNewPreparation() == true",
-            "paperManualSubmitViewModel?.resetForNewPreparation()",
+            "paperOrderPreflightViewModel?.resetForNewPreparation()",
+            "paperManualSubmitViewModel?.resetForNewPreparation {",
         ).forEach { contract ->
             assertTrue(dashboard.contains(contract), "Missing lifecycle UI contract: $contract")
         }
+        val durableResetCallback = dashboard
+            .substringAfter("manualPaperNewPreparation = {")
+            .substringBefore("candleSymbolChanged =")
+        val durableAckIndex = durableResetCallback.indexOf(
+            "paperManualSubmitViewModel?.resetForNewPreparation {",
+        )
+        val preflightResetIndex = durableResetCallback.indexOf(
+            "paperOrderPreflightViewModel?.resetForNewPreparation()",
+        )
+        assertTrue(durableAckIndex >= 0)
+        assertTrue(preflightResetIndex > durableAckIndex)
+        assertFalse(
+            dashboard.contains(
+                "paperOrderPreflightViewModel?.resetForNewPreparation() == true",
+            ),
+        )
         assertTrue(sections.contains("manualPaperRefreshOrderStatus"))
         assertTrue(sections.contains("manualPaperNewPreparation"))
         assertTrue(sections.contains("pendingSubmittedOrder"))
         assertTrue(application.contains("OkHttpAlpacaPaperOrderStatusHttpClient()"))
+        assertTrue(application.contains("database.paperOrderReconciliationDao()"))
         assertTrue(activity.contains("orderStatusClient = app.alpacaPaperOrderStatusReadOnlyClient"))
         assertTrue(
             activity.contains(
@@ -165,6 +185,34 @@ class Ux2UiSafetyContractTest {
             .containsMatchIn(statusSources))
         assertFalse(statusSources.contains("submitOnce("))
         assertFalse(statusSources.contains("LaunchedEffect"))
+        assertFalse(statusSources.contains("while ("))
+        assertFalse(statusSources.contains("delay("))
+        assertFalse(
+            Regex("""\b(?:cancel|replace|closePosition)\s*\(""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(statusSources),
+        )
+    }
+
+    @Test
+    fun `guided preparation and arm callbacks recheck persistent reconciliation`() {
+        val dashboard = source("ui/dashboard/OfflineDashboardScreen.kt")
+        val manualViewModel = source("ui/dashboard/PaperManualSubmitViewModel.kt")
+        val preflightCallback = dashboard
+            .substringAfter("preflightPrepareGuided = {")
+            .substringBefore("dryRunAuditRefresh =")
+        val armCallback = dashboard
+            .substringAfter("manualPaperArm = {")
+            .substringBefore("manualPaperDisarm =")
+        val synchronizationGate = dashboard
+            .substringAfter("internal fun preparedPreviewIsSynchronized(")
+            .substringBefore("internal data class PaperManualConfirmationUiGate")
+
+        assertTrue(preflightCallback.contains("!manual.blocksNewPaperPreparation"))
+        assertTrue(armCallback.contains("manual?.blocksNewPaperPreparation == false"))
+        assertTrue(synchronizationGate.contains("manual?.blocksNewPaperPreparation == false"))
+        assertTrue(manualViewModel.contains("orderStatusTrackerRepository.consolidateFromAudit()"))
+        assertTrue(manualViewModel.contains("orderStatusTrackerRepository.persistLifecycle("))
+        assertTrue(manualViewModel.contains("orderStatusTrackerRepository.acknowledgeTerminalReset("))
     }
 
     @Test

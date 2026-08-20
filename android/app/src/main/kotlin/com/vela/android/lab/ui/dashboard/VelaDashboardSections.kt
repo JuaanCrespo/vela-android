@@ -380,11 +380,8 @@ private fun PaperSection(
             PaperOrderPreparationCard(
                 state = it,
                 manualSessionArmed = data.manualPaper?.sessionArmed == true,
-                pendingSubmittedOrder = data.manualPaper?.let { manual ->
-                    !manual.orderTrackingRestoreComplete ||
-                        manual.untrackableSubmittedOrder ||
-                        (manual.trackedOrder != null && !manual.newPreparationAllowed)
-                } ?: false,
+                pendingSubmittedOrder =
+                    data.manualPaper?.blocksNewPaperPreparation ?: true,
                 onSymbolChange = actions.preflightSymbolChanged,
                 onSideChange = actions.preflightSideChanged,
                 onQuantityChange = actions.preflightQuantityChanged,

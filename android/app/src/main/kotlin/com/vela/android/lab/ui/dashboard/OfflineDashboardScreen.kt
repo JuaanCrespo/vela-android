@@ -213,7 +213,8 @@ fun OfflineDashboardScreen(
             preflightSideChanged = { paperOrderPreflightViewModel?.onSideChange(it) },
             preflightQuantityChanged = { paperOrderPreflightViewModel?.onQuantityInputChange(it) },
             preflightPrepareGuided = {
-                if (paperManualSubmitViewModel?.uiState?.value?.sessionArmed != true) {
+                val manual = paperManualSubmitViewModel?.uiState?.value
+                if (manual?.sessionArmed == false && !manual.blocksNewPaperPreparation) {
                     paperOrderPreflightViewModel?.prepareGuidedLocalChain()
                 }
             },
@@ -226,6 +227,7 @@ fun OfflineDashboardScreen(
                     preparedPreviewIsSynchronized(preflight, manual),
                     manual?.compileTimeEnabled == true,
                     manual?.sessionArmed == false,
+                    manual?.blocksNewPaperPreparation == false,
                 ).all { it }
                 if (canArm) {
                     paperManualSubmitViewModel?.armSession()
@@ -247,10 +249,8 @@ fun OfflineDashboardScreen(
                 val preflightCanReset =
                     paperOrderPreflightViewModel?.canResetForNewPreparation() == true
                 if (manualCanReset && preflightCanReset) {
-                    val preflightReset =
-                        paperOrderPreflightViewModel?.resetForNewPreparation() == true
-                    if (preflightReset) {
-                        paperManualSubmitViewModel?.resetForNewPreparation()
+                    paperManualSubmitViewModel?.resetForNewPreparation {
+                        paperOrderPreflightViewModel?.resetForNewPreparation()
                     }
                 }
             },
@@ -639,26 +639,52 @@ internal fun PaperManualSubmitCard(
                     )
                 }
             }
-            state.trackedOrder?.let { tracked ->
-                Spacer(modifier = Modifier.height(8.dp))
-                SectionTitle("Seguimiento de la orden · solo lectura")
-                LabeledRow(
-                    "Estado Alpaca",
-                    state.orderStatusSnapshot?.displayStatus ?: "NO CONSULTADO",
-                )
-                LabeledRow("Order id", tracked.orderId)
-                state.orderStatusSnapshot?.let { lifecycle ->
-                    LabeledRow("Cantidad ejecutada", lifecycle.filledQuantity.toString())
-                    LabeledRow(
-                        "Precio promedio ejecutado",
-                        formatPrice(lifecycle.filledAveragePriceUsd),
+            Spacer(modifier = Modifier.height(8.dp))
+            SectionTitle("Reconciliación Paper · solo lectura")
+            LabeledRow("Estado", state.reconciliationUiStatus.name)
+            state.reconciliation?.let { reconciliation ->
+                LabeledRow("Verdict", reconciliation.verdict.name)
+                LabeledRow("Candidates", reconciliation.candidates.size.toString())
+                if (reconciliation.issues.isNotEmpty()) {
+                    Text(
+                        "Razones: ${reconciliation.issues.joinToString { it.name }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
-                    LabeledRow("Ejecutada en", lifecycle.filledAtIso ?: "—")
                 }
-                LabeledRow(
-                    "Última consulta",
-                    formatEpochMillis(state.orderStatusCheckedAtEpochMillis),
-                )
+                reconciliation.candidates.forEachIndexed { index, candidate ->
+                    SectionTitle("Identidad ${index + 1}")
+                    LabeledRow("Mapping", if (candidate.mappingExact) "EXACT" else "AMBIGUOUS")
+                    LabeledRow("Attempt id", candidate.submitAttemptId)
+                    LabeledRow("Attempt audit row", candidate.attemptStartedAuditEntryId?.toString() ?: "—")
+                    LabeledRow("Result audit row", candidate.submitResultAuditEntryId?.toString() ?: "—")
+                    LabeledRow("Preview id", candidate.previewId ?: "—")
+                    LabeledRow("Linked dry-run id", candidate.linkedClientDryRunId ?: "—")
+                    LabeledRow("Paper order id", candidate.orderId ?: "—")
+                    LabeledRow("Client order id", candidate.clientOrderId ?: "—")
+                    LabeledRow("Order", listOfNotNull(candidate.symbol, candidate.side, candidate.quantity?.toString(), candidate.orderType, candidate.timeInForce).joinToString(" · ").ifBlank { "—" })
+                    LabeledRow("Submitted at", formatEpochMillis(candidate.submittedAtEpochMillis))
+                    LabeledRow("Local result", candidate.localSubmitResult ?: "—")
+                    LabeledRow("Lifecycle", candidate.latestLifecycleSnapshot?.displayStatus ?: candidate.lifecycleHistory.lastOrNull()?.status ?: "NO CONSULTADO")
+                    LabeledRow("Lifecycle observations", candidate.lifecycleHistory.size.toString())
+                    LabeledRow("Última observación", formatEpochMillis(candidate.lifecycleObservedAtEpochMillis))
+                    LabeledRow(
+                        "Reset acknowledged at",
+                        formatEpochMillis(candidate.resetAcknowledgedAtEpochMillis),
+                    )
+                    candidate.latestLifecycleSnapshot?.let { lifecycle ->
+                        LabeledRow("Cantidad ejecutada", lifecycle.filledQuantity.toString())
+                        LabeledRow("Precio promedio ejecutado", formatPrice(lifecycle.filledAveragePriceUsd))
+                        LabeledRow("Ejecutada en", lifecycle.filledAtIso ?: "—")
+                    }
+                    if (candidate.issues.isNotEmpty()) {
+                        Text(
+                            "Identity reasons: ${candidate.issues.joinToString { it.name }}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
             state.orderStatusError?.let { error ->
                 Text(
@@ -733,18 +759,49 @@ private fun PaperManualSubmitControls(
         )
         return
     }
+    if (!state.sessionArmed && state.lastResult == null &&
+        state.reconciliationUiStatus == PaperOrderReconciliationUiStatus.MULTIPLE
+    ) {
+        Text(
+            "MULTIPLE_UNRESOLVED_PAPER_ORDERS. No se selecciona una orden por fecha.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
     if (!state.sessionArmed) {
+        if (state.resetEligibleAttemptId != null) {
+            Text(
+                "El estado terminal está persistido. Confirmá manualmente el reset local " +
+                    "para preparar otra orden.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onNewPreparation,
+                enabled = !state.isSubmitting && !state.isRefreshingOrderStatus &&
+                    !state.isResettingReconciliation,
+            ) {
+                Text(
+                    if (state.isResettingReconciliation) "Guardando reset local…"
+                    else "Preparar otra orden Paper",
+                )
+            }
+            return
+        }
         if (state.lastResult != null) {
             Text(
                 "Intento finalizado. La preview anterior no se reutiliza.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (state.trackedOrder != null) {
+            if (state.canRefreshSingleExactOrder) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = onRefreshOrderStatus,
-                    enabled = !state.isRefreshingOrderStatus && !state.isSubmitting,
+                    enabled = !state.isRefreshingOrderStatus && !state.isSubmitting &&
+                        !state.isResettingReconciliation,
                 ) {
                     Text(
                         if (state.isRefreshingOrderStatus) "Consultando estado Alpaca…"
@@ -774,7 +831,7 @@ private fun PaperManualSubmitControls(
             }
             return
         }
-        if (state.trackedOrder != null && !state.newPreparationAllowed) {
+        if (state.canRefreshSingleExactOrder) {
             Text(
                 "Hay una orden Paper enviada cuyo estado final todavía no fue verificado.",
                 style = MaterialTheme.typography.bodySmall,
@@ -1714,9 +1771,7 @@ internal fun preparedPreviewIsSynchronized(
         manual?.readinessStatus ==
             PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED.name,
         manual?.lastResult == null,
-        manual?.orderTrackingRestoreComplete == true,
-        manual?.untrackableSubmittedOrder == false,
-        manual?.let { it.trackedOrder == null || it.newPreparationAllowed } == true,
+        manual?.blocksNewPaperPreparation == false,
     ).all { it }
 }
 

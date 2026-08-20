@@ -24,6 +24,8 @@ import com.vela.android.lab.data.paper.preflight.PreviewQueueFakeDao
 import com.vela.android.lab.data.paper.preflight.PreflightBlockReason
 import com.vela.android.lab.data.paper.preflight.PreflightStatus
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitError
+import com.vela.android.lab.data.paper.status.PaperOrderReconciliationSnapshot
+import com.vela.android.lab.data.paper.status.PaperOrderReconciliationVerdict
 import com.vela.android.lab.data.repository.MarketDataRepository
 import com.vela.android.lab.data.repository.SignalRepository
 import com.vela.android.lab.data.watchlist.InMemoryWatchlistStore
@@ -666,12 +668,18 @@ class PaperOrderPreflightViewModelTest {
             vm.prepareGuidedLocalChain()
             val preflight = vm.uiState.value
             val preparedId = preflight.lastPayloadPreview!!.previewId
+            val clearReconciliation = PaperOrderReconciliationSnapshot(
+                verdict = PaperOrderReconciliationVerdict.CLEAR,
+                candidates = emptyList(),
+                issues = emptySet(),
+            )
             val synchronizedManual = PaperManualSubmitUiState.initial(true).copy(
                 previewId = preparedId,
                 preflightStatus = PreflightStatus.ALLOWED_DRY_RUN.name,
                 readinessStatus =
                     PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED.name,
-                orderTrackingRestoreComplete = true,
+                reconciliation = clearReconciliation,
+                reconciliationRestoreComplete = true,
             )
 
             assertTrue(preparedPreviewIsSynchronized(preflight, synchronizedManual))
@@ -685,6 +693,37 @@ class PaperOrderPreflightViewModelTest {
                 preparedPreviewIsSynchronized(
                     preflight,
                     synchronizedManual.copy(readinessStatus = "NOT_CHECKED"),
+                ),
+            )
+            assertFalse(
+                preparedPreviewIsSynchronized(
+                    preflight,
+                    synchronizedManual.copy(
+                        reconciliation = PaperOrderReconciliationSnapshot(
+                            verdict = PaperOrderReconciliationVerdict
+                                .MULTIPLE_UNRESOLVED_PAPER_ORDERS,
+                            candidates = emptyList(),
+                            issues = emptySet(),
+                        ),
+                    ),
+                ),
+            )
+            assertFalse(
+                preparedPreviewIsSynchronized(
+                    preflight,
+                    synchronizedManual.copy(
+                        reconciliation = PaperOrderReconciliationSnapshot(
+                            verdict = PaperOrderReconciliationVerdict.AMBIGUOUS,
+                            candidates = emptyList(),
+                            issues = emptySet(),
+                        ),
+                    ),
+                ),
+            )
+            assertFalse(
+                preparedPreviewIsSynchronized(
+                    preflight,
+                    synchronizedManual.copy(reconciliationRestoreComplete = false),
                 ),
             )
         }

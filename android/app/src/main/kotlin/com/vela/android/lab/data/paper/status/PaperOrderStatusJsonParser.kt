@@ -1,6 +1,7 @@
 package com.vela.android.lab.data.paper.status
 
 import java.time.Instant
+import java.util.Locale
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -25,7 +26,34 @@ class PaperOrderStatusJsonParser {
             return ParseResult.Err("Paper order status response did not contain a valid id.")
         }
 
-        val rawStatus = json.optString("status", "").lowercase()
+        val clientOrderId = json.optString("client_order_id", "")
+        if (clientOrderId.isBlank() || clientOrderId.length > 128) {
+            return ParseResult.Err(
+                "Paper order status response did not contain a valid client order id.",
+            )
+        }
+        val symbol = json.optString("symbol", "").uppercase(Locale.ROOT)
+        if (!symbol.matches(Regex("^[A-Z][A-Z0-9.-]{0,31}$"))) {
+            return ParseResult.Err("Paper order status response did not contain a valid symbol.")
+        }
+        val side = json.optString("side", "").uppercase(Locale.ROOT)
+        if (side != "BUY" && side != "SELL") {
+            return ParseResult.Err("Paper order status response did not contain a valid side.")
+        }
+        val quantity = json.requiredPositiveDouble("qty")
+            ?: return ParseResult.Err("Paper order status response had an invalid quantity.")
+        val orderType = json.optString("type", "").uppercase(Locale.ROOT)
+        if (orderType != "MARKET" && orderType != "LIMIT") {
+            return ParseResult.Err("Paper order status response did not contain a valid type.")
+        }
+        val timeInForce = json.optString("time_in_force", "").uppercase(Locale.ROOT)
+        if (timeInForce != "DAY") {
+            return ParseResult.Err(
+                "Paper order status response did not contain a valid time-in-force.",
+            )
+        }
+
+        val rawStatus = json.optString("status", "").lowercase(Locale.ROOT)
         if (!rawStatus.matches(Regex("^[a-z_]{1,40}$"))) {
             return ParseResult.Err("Paper order status response did not contain a valid status.")
         }
@@ -45,6 +73,12 @@ class PaperOrderStatusJsonParser {
             ParseResult.Ok(
                 PaperOrderStatusSnapshot(
                     orderId = orderId,
+                    clientOrderId = clientOrderId,
+                    symbol = symbol,
+                    side = side,
+                    quantity = quantity,
+                    orderType = orderType,
+                    timeInForce = timeInForce,
                     status = PaperOrderLifecycleStatus.fromWireValue(rawStatus),
                     rawStatus = rawStatus,
                     filledQuantity = filledQuantity,
@@ -72,6 +106,16 @@ class PaperOrderStatusJsonParser {
             else -> null
         }
         return parsed?.takeIf { it.isFinite() && it >= 0.0 }
+    }
+
+    private fun JSONObject.requiredPositiveDouble(key: String): Double? {
+        if (!has(key) || isNull(key)) return null
+        val parsed = when (val raw = opt(key)) {
+            is Number -> raw.toDouble()
+            is String -> raw.toDoubleOrNull()
+            else -> null
+        }
+        return parsed?.takeIf { it.isFinite() && it > 0.0 }
     }
 
     private fun JSONObject.optionalPositiveDouble(key: String): OptionalDouble {

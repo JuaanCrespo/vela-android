@@ -289,7 +289,10 @@ class VelaLabApplication : Application() {
     }
 
     val paperOrderStatusTrackerRepository: PaperOrderStatusTrackerRepository by lazy {
-        PaperOrderStatusTrackerRepository(paperOrderSubmitAuditRepository)
+        PaperOrderStatusTrackerRepository(
+            auditRepository = paperOrderSubmitAuditRepository,
+            reconciliationDao = database.paperOrderReconciliationDao(),
+        )
     }
 
     val paperManualSubmitExecutor: PaperManualSubmitExecutor by lazy {

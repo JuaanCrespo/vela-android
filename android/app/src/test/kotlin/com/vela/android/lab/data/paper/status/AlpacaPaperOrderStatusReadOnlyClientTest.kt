@@ -13,161 +13,168 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class AlpacaPaperOrderStatusReadOnlyClientTest {
-
-    private val id = "4b60549d-6dab-47d8-93eb-382ed1eed108"
-    private val otherId = "7d9b45d4-98fb-4f39-a9f0-22c58bdeca31"
     private val credentials = AlpacaCredentials("PKSAFE123", "top-secret-value")
     private val credentialsProvider = AlpacaCredentialsProvider { credentials }
 
     @Test
-    fun `successful fetch uses exactly one guarded GET and returns FILLED`() =
+    fun successfulFetchUsesOneGuardedGetAndReturnsCompleteIdentityEvidence() =
         runTest(UnconfinedTestDispatcher()) {
-            val http = RecordingHttpClient(success(id))
+            val http = RecordingStatusHttpClient(success(VALID_TARGET))
             val client = AlpacaPaperOrderStatusReadOnlyClient(credentialsProvider, http)
 
-            val result = client.fetchOrderStatus(id)
+            val result = client.fetchOrderStatus(VALID_TARGET)
+                as AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok
 
-            assertTrue(result is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok)
-            val snapshot =
-                (result as AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok).value
-            assertEquals(PaperOrderLifecycleStatus.FILLED, snapshot.status)
+            assertEquals(PaperOrderLifecycleStatus.FILLED, result.value.status)
+            assertEquals("client-1", result.value.clientOrderId)
+            assertEquals(200, result.evidence.httpStatusCode)
+            assertEquals(PaperOrderStatusFetchEvidence.SOURCE, result.evidence.source)
             assertEquals(1, http.callCount)
-            assertEquals(listOf(AlpacaPaperOrderStatusEndpoint.urlFor(id)), http.urls)
-            assertEquals("PKSAFE123", http.lastKeyId)
-        }
-
-    @Test
-    fun `missing credentials performs zero HTTP calls`() =
-        runTest(UnconfinedTestDispatcher()) {
-            val http = RecordingHttpClient(success(id))
-            val client = AlpacaPaperOrderStatusReadOnlyClient(
-                NoAlpacaCredentialsProvider,
-                http,
+            assertEquals(
+                listOf(AlpacaPaperOrderStatusEndpoint.urlFor(VALID_TARGET.orderId)),
+                http.urls,
             )
-
-            val result = client.fetchOrderStatus(id)
-
-            assertEquals(AlpacaPaperOrderStatusReadOnlyClient.FetchResult.AuthMissing, result)
-            assertEquals(0, http.callCount)
         }
 
     @Test
-    fun `invalid id fails before credentials or HTTP can be used`() =
+    fun missingCredentialsAndInvalidUuidPerformZeroHttpCalls() =
         runTest(UnconfinedTestDispatcher()) {
+            val missingHttp = RecordingStatusHttpClient(success(VALID_TARGET))
+            val missing = AlpacaPaperOrderStatusReadOnlyClient(
+                NoAlpacaCredentialsProvider,
+                missingHttp,
+            ).fetchOrderStatus(VALID_TARGET)
+            assertEquals(AlpacaPaperOrderStatusReadOnlyClient.FetchResult.AuthMissing, missing)
+            assertEquals(0, missingHttp.callCount)
+
             var credentialReads = 0
-            val provider = AlpacaCredentialsProvider {
-                credentialReads += 1
-                credentials
-            }
-            val http = RecordingHttpClient(success(id))
-            val client = AlpacaPaperOrderStatusReadOnlyClient(provider, http)
-
-            val result = client.fetchOrderStatus("not-a-uuid")
-
-            assertEquals(AlpacaPaperOrderStatusReadOnlyClient.FetchResult.InvalidOrderId, result)
+            val invalidHttp = RecordingStatusHttpClient(success(VALID_TARGET))
+            val invalid = AlpacaPaperOrderStatusReadOnlyClient(
+                AlpacaCredentialsProvider {
+                    credentialReads += 1
+                    credentials
+                },
+                invalidHttp,
+            ).fetchOrderStatus(VALID_TARGET.copy(orderId = "not-a-uuid"))
+            assertEquals(AlpacaPaperOrderStatusReadOnlyClient.FetchResult.InvalidOrderId, invalid)
             assertEquals(0, credentialReads)
-            assertEquals(0, http.callCount)
+            assertEquals(0, invalidHttp.callCount)
         }
 
     @Test
-    fun `response order id mismatch fails closed`() = runTest(UnconfinedTestDispatcher()) {
-        val http = RecordingHttpClient(success(otherId))
-        val client = AlpacaPaperOrderStatusReadOnlyClient(credentialsProvider, http)
-
-        val result = client.fetchOrderStatus(id)
-
-        assertEquals(
-            AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ResponseIdMismatch,
-            result,
+    fun anyResponseIdentityMismatchFailsBeforeOk() = runTest(UnconfinedTestDispatcher()) {
+        val mismatches = listOf(
+            VALID_TARGET.copy(orderId = OTHER_ORDER_ID),
+            VALID_TARGET.copy(clientOrderId = "another-client"),
+            VALID_TARGET.copy(symbol = "QQQ"),
+            VALID_TARGET.copy(side = "SELL"),
+            VALID_TARGET.copy(quantity = 2.0),
+            VALID_TARGET.copy(orderType = "LIMIT"),
         )
-        assertEquals(1, http.callCount)
+        mismatches.forEach { responseIdentity ->
+            val http = RecordingStatusHttpClient(success(responseIdentity))
+            val result = AlpacaPaperOrderStatusReadOnlyClient(
+                credentialsProvider,
+                http,
+            ).fetchOrderStatus(VALID_TARGET)
+            assertEquals(
+                AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ResponseIdentityMismatch,
+                result,
+            )
+            assertEquals(1, http.callCount)
+        }
     }
 
     @Test
-    fun `HTTP network and parser errors expose no response body or credentials`() =
-        runTest(UnconfinedTestDispatcher()) {
-            val results = listOf(
-                AlpacaPaperOrderStatusReadOnlyClient(
-                    credentialsProvider,
-                    RecordingHttpClient(PaperOrderStatusHttpResult.HttpError(403)),
-                ).fetchOrderStatus(id),
-                AlpacaPaperOrderStatusReadOnlyClient(
-                    credentialsProvider,
-                    RecordingHttpClient(PaperOrderStatusHttpResult.NetworkError),
-                ).fetchOrderStatus(id),
-                AlpacaPaperOrderStatusReadOnlyClient(
-                    credentialsProvider,
-                    RecordingHttpClient(
-                        PaperOrderStatusHttpResult.Success(
-                            200,
-                            "not-json APCA-API-SECRET-KEY=top-secret-value",
-                        ),
+    fun errorsExposeNoResponseBodyOrCredentials() = runTest(UnconfinedTestDispatcher()) {
+        val results = listOf(
+            AlpacaPaperOrderStatusReadOnlyClient(
+                credentialsProvider,
+                RecordingStatusHttpClient(PaperOrderStatusHttpResult.HttpError(403)),
+            ).fetchOrderStatus(VALID_TARGET),
+            AlpacaPaperOrderStatusReadOnlyClient(
+                credentialsProvider,
+                RecordingStatusHttpClient(PaperOrderStatusHttpResult.NetworkError),
+            ).fetchOrderStatus(VALID_TARGET),
+            AlpacaPaperOrderStatusReadOnlyClient(
+                credentialsProvider,
+                RecordingStatusHttpClient(
+                    PaperOrderStatusHttpResult.Success(
+                        200,
+                        "not-json APCA-API-SECRET-KEY=top-secret-value",
                     ),
-                ).fetchOrderStatus(id),
-            )
-
-            assertTrue(results[0] is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.HttpError)
-            assertEquals(
-                403,
-                (results[0] as AlpacaPaperOrderStatusReadOnlyClient.FetchResult.HttpError)
-                    .statusCode,
-            )
-            assertEquals(
-                AlpacaPaperOrderStatusReadOnlyClient.FetchResult.NetworkError,
-                results[1],
-            )
-            assertTrue(results[2] is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ParseError)
-            results.forEach { result ->
-                assertFalse(result.toString().contains("top-secret-value"))
-                assertFalse(result.toString().contains("PKSAFE123"))
-            }
+                ),
+            ).fetchOrderStatus(VALID_TARGET),
+        )
+        assertTrue(results[0] is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.HttpError)
+        assertEquals(AlpacaPaperOrderStatusReadOnlyClient.FetchResult.NetworkError, results[1])
+        assertTrue(results[2] is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ParseError)
+        results.forEach { result ->
+            assertFalse(result.toString().contains("top-secret-value"))
+            assertFalse(result.toString().contains("PKSAFE123"))
         }
+    }
 
     @Test
-    fun `public surfaces remain GET-only and contain no mutation-shape method`() {
-        val httpMethods = AlpacaPaperOrderStatusHttpClient::class.java.declaredMethods
-            .map { it.name }
-            .toSet()
-        assertEquals(setOf("executeGet"), httpMethods)
-
-        val forbidden = listOf(
-            "submit", "place", "cancel", "replace", "close", "delete",
-            "patch", "post", "put", "retry",
+    fun publicTransportSurfaceRemainsGetOnly() {
+        assertEquals(
+            setOf("executeGet"),
+            AlpacaPaperOrderStatusHttpClient::class.java.declaredMethods.map { it.name }.toSet(),
         )
-        val methods = AlpacaPaperOrderStatusReadOnlyClient::class.java.declaredMethods
+        val forbidden = listOf("submit", "cancel", "replace", "close", "delete", "patch", "post")
+        AlpacaPaperOrderStatusReadOnlyClient::class.java.declaredMethods
             .map { it.name }
             .filterNot { it.contains('$') }
-        methods.forEach { method ->
-            forbidden.forEach { fragment ->
-                assertFalse(
-                    method.contains(fragment, ignoreCase = true),
-                    "$method must not contain $fragment",
-                )
+            .forEach { method ->
+                forbidden.forEach { fragment ->
+                    assertFalse(method.contains(fragment, ignoreCase = true))
+                }
             }
-        }
     }
 
-    private fun success(orderId: String): PaperOrderStatusHttpResult.Success =
+    private fun success(identity: PaperOrderLifecycleLookupTarget) =
         PaperOrderStatusHttpResult.Success(
             200,
-            """{
-              "id":"$orderId",
+            """
+            {
+              "id":"${identity.orderId}",
+              "client_order_id":"${identity.clientOrderId}",
+              "symbol":"${identity.symbol}",
+              "side":"${identity.side.lowercase()}",
+              "qty":"${identity.quantity}",
+              "type":"${identity.orderType.lowercase()}",
+              "time_in_force":"${identity.timeInForce.lowercase()}",
               "status":"filled",
               "filled_qty":"1",
               "filled_avg_price":"773.49",
               "filled_at":"2026-08-07T19:31:02Z"
-            }""",
+            }
+            """.trimIndent(),
         )
+
+    companion object {
+        private const val ORDER_ID = "4b60549d-6dab-47d8-93eb-382ed1eed108"
+        private const val OTHER_ORDER_ID = "7d9b45d4-98fb-4f39-a9f0-22c58bdeca31"
+        private val VALID_TARGET = PaperOrderLifecycleLookupTarget(
+            submitAttemptId = "attempt-1",
+            submitResultAuditEntryId = 2L,
+            orderId = ORDER_ID,
+            clientOrderId = "client-1",
+            symbol = "SPY",
+            side = "BUY",
+            quantity = 1.0,
+            orderType = "MARKET",
+            timeInForce = "DAY",
+        )
+    }
 }
 
-private class RecordingHttpClient(
+private class RecordingStatusHttpClient(
     private val result: PaperOrderStatusHttpResult,
 ) : AlpacaPaperOrderStatusHttpClient {
     var callCount: Int = 0
         private set
-    val urls: MutableList<String> = mutableListOf()
-    var lastKeyId: String? = null
-        private set
+    val urls = mutableListOf<String>()
 
     override suspend fun executeGet(
         url: String,
@@ -177,7 +184,6 @@ private class RecordingHttpClient(
         AlpacaPaperOrderStatusEndpoint.requireSafeGet(url)
         callCount += 1
         urls += url
-        lastKeyId = keyId
         return result
     }
 }

@@ -13,12 +13,12 @@ import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreview
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreviewRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPreflightResult
 import com.vela.android.lab.data.paper.status.AlpacaPaperOrderStatusReadOnlyClient
-import com.vela.android.lab.data.paper.status.AlpacaPaperOrderStatusEndpoint
-import com.vela.android.lab.data.paper.status.PaperOrderLifecycleStatus
-import com.vela.android.lab.data.paper.status.PaperOrderStatusSnapshot
-import com.vela.android.lab.data.paper.status.PaperOrderTrackingRestoreResult
+import com.vela.android.lab.data.paper.status.PaperOrderLifecycleLookupResult
+import com.vela.android.lab.data.paper.status.PaperOrderLifecyclePersistResult
+import com.vela.android.lab.data.paper.status.PaperOrderReconciliationIssue
+import com.vela.android.lab.data.paper.status.PaperOrderReconciliationSnapshot
+import com.vela.android.lab.data.paper.status.PaperOrderResetAcknowledgementResult
 import com.vela.android.lab.data.paper.status.PaperOrderTrackingSource
-import com.vela.android.lab.data.paper.status.TrackedPaperOrder
 import com.vela.android.lab.data.paper.submit.PaperManualExecutionFeatureGate
 import com.vela.android.lab.data.paper.submit.PaperFinalPriceEvaluation
 import com.vela.android.lab.data.paper.submit.PaperManualSubmitApproval
@@ -78,7 +78,7 @@ class PaperManualSubmitViewModel(
     private var confirmationTokenIssuedForArmedSession: Boolean = false
 
     init {
-        restoreLatestSubmittedOrder()
+        restorePersistentReconciliation()
     }
 
     fun updateSource(
@@ -104,7 +104,7 @@ class PaperManualSubmitViewModel(
         confirmation = null
         request = null
         tokenStore.invalidate()
-        val trackingState = _uiState.value
+        val reconciliationState = _uiState.value
         _uiState.value = PaperManualSubmitUiState.initial(featureGate.compileTimeEnabled).copy(
             realLocked = appState.realModeLocked,
             previewId = preview?.previewId,
@@ -121,14 +121,12 @@ class PaperManualSubmitViewModel(
             readinessStatus = readiness?.status?.name,
             requiredConfirmationText = preview?.let(PaperManualSubmitTokenStore::requiredText)
                 .orEmpty(),
-            trackedOrder = trackingState.trackedOrder,
-            orderStatusSnapshot = trackingState.orderStatusSnapshot,
-            orderStatusCheckedAtEpochMillis = trackingState.orderStatusCheckedAtEpochMillis,
+            reconciliation = reconciliationState.reconciliation,
+            reconciliationRestoreComplete =
+                reconciliationState.reconciliationRestoreComplete,
             isRefreshingOrderStatus = false,
-            orderStatusError = trackingState.orderStatusError,
-            newPreparationAllowed = trackingState.newPreparationAllowed,
-            orderTrackingRestoreComplete = trackingState.orderTrackingRestoreComplete,
-            untrackableSubmittedOrder = trackingState.untrackableSubmittedOrder,
+            isResettingReconciliation = false,
+            orderStatusError = reconciliationState.orderStatusError,
         )
     }
 
@@ -304,24 +302,16 @@ class PaperManualSubmitViewModel(
         _uiState.update { it.copy(isSubmitting = true, gateAllowed = false, lastError = null) }
         viewModelScope.launch {
             val result = executor.executeOnce(currentRequest, currentPreview, input)
-            val trackedOrder = result.toTrackedPaperOrder(currentPreview)
-            val existingTracking = _uiState.value
-            val ambiguousWithoutTrackableId =
-                trackedOrder == null && (
-                    result.status == PaperOrderSubmitStatus.SUBMITTED ||
-                        result.status == PaperOrderSubmitStatus.FAILED &&
-                            !result.mayResetWithoutLifecycleLookup()
-                    )
-            val replacesExistingTracking = trackedOrder != null || ambiguousWithoutTrackableId
-            val previousTrackingResolved =
-                existingTracking.orderTrackingRestoreComplete &&
-                    !existingTracking.untrackableSubmittedOrder &&
-                    (existingTracking.trackedOrder == null ||
-                        existingTracking.orderStatusSnapshot?.status
-                            ?.allowsNewPreparation() == true)
             confirmation = null
             request = null
             tokenStore.invalidate()
+            val reconciled = try {
+                orderStatusTrackerRepository.consolidateFromAudit()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
             _uiState.update {
                 it.copy(
                     sessionArmed = false,
@@ -331,33 +321,15 @@ class PaperManualSubmitViewModel(
                     gateAllowed = false,
                     lastResult = result,
                     lastError = result.safeErrorMessage,
-                    trackedOrder = when {
-                        trackedOrder != null -> trackedOrder
-                        ambiguousWithoutTrackableId -> null
-                        else -> existingTracking.trackedOrder
-                    },
-                    orderStatusSnapshot =
-                        if (replacesExistingTracking) null
-                        else existingTracking.orderStatusSnapshot,
-                    orderStatusCheckedAtEpochMillis =
-                        if (replacesExistingTracking) null
-                        else existingTracking.orderStatusCheckedAtEpochMillis,
+                    reconciliation = reconciled,
+                    reconciliationRestoreComplete = true,
                     isRefreshingOrderStatus = false,
-                    orderStatusError = when {
-                        ambiguousWithoutTrackableId ->
-                            "The latest Paper attempt cannot be tracked safely. " +
-                                "Another preparation remains blocked."
-                        trackedOrder != null -> null
-                        else -> existingTracking.orderStatusError
-                    },
-                    newPreparationAllowed =
-                        result.mayResetWithoutLifecycleLookup() &&
-                            !replacesExistingTracking && previousTrackingResolved,
-                    orderTrackingRestoreComplete = true,
-                    untrackableSubmittedOrder = when {
-                        ambiguousWithoutTrackableId -> true
-                        trackedOrder != null -> false
-                        else -> existingTracking.untrackableSubmittedOrder
+                    isResettingReconciliation = false,
+                    orderStatusError = if (reconciled == null) {
+                        "Local Paper reconciliation failed safely; another preparation " +
+                            "remains blocked."
+                    } else {
+                        null
                     },
                 )
             }
@@ -367,10 +339,9 @@ class PaperManualSubmitViewModel(
     /** Explicit GET-only lifecycle refresh. Never polls, retries, arms, or submits. */
     fun refreshOrderStatus() {
         val current = _uiState.value
-        val trackedOrder = current.trackedOrder ?: return
-        val client = orderStatusClient
-        if (current.sessionArmed || current.isSubmitting || current.isRefreshing ||
-            current.isRefreshingOrderStatus
+        if (!current.canRefreshSingleExactOrder || current.sessionArmed ||
+            current.isSubmitting || current.isRefreshing || current.isRefreshingOrderStatus ||
+            current.isResettingReconciliation
         ) {
             return
         }
@@ -381,39 +352,100 @@ class PaperManualSubmitViewModel(
             )
         }
         viewModelScope.launch {
-            val now = clock().toEpochMilli()
+            val lookup = try {
+                orderStatusTrackerRepository.lookupTarget()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            val target = (lookup as? PaperOrderLifecycleLookupResult.Exact)?.target
+            if (target == null) {
+                val refreshed = try {
+                    orderStatusTrackerRepository.consolidateFromAudit()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+                _uiState.update {
+                    it.copy(
+                        reconciliation = refreshed ?: it.reconciliation,
+                        reconciliationRestoreComplete = true,
+                        isRefreshingOrderStatus = false,
+                        orderStatusError = when (lookup) {
+                            is PaperOrderLifecycleLookupResult.Blocked ->
+                                lookup.issues.safeReconciliationMessage(
+                                    "Paper status GET remained blocked.",
+                                )
+                            else ->
+                                "Paper status GET remained blocked by local reconciliation."
+                        },
+                    )
+                }
+                return@launch
+            }
             val result = try {
-                client.fetchOrderStatus(trackedOrder.orderId)
+                orderStatusClient.fetchOrderStatus(target)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 _uiState.update {
                     it.copy(
-                        orderStatusCheckedAtEpochMillis = now,
                         isRefreshingOrderStatus = false,
                         orderStatusError =
                             "Paper order status lookup failed safely; no retry was attempted.",
-                        newPreparationAllowed = false,
                     )
                 }
                 return@launch
             }
             when (result) {
-                is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok -> _uiState.update {
-                    it.copy(
-                        orderStatusSnapshot = result.value,
-                        orderStatusCheckedAtEpochMillis = now,
-                        isRefreshingOrderStatus = false,
-                        orderStatusError = null,
-                        newPreparationAllowed = result.value.status.allowsNewPreparation(),
-                    )
+                is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok -> {
+                    val observedAt = clock().toEpochMilli()
+                    val persisted = try {
+                        orderStatusTrackerRepository.persistLifecycle(
+                            target = target,
+                            status = result.value,
+                            evidence = result.evidence,
+                            observedAtEpochMillis = observedAt,
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        _uiState.update {
+                            it.copy(
+                                isRefreshingOrderStatus = false,
+                                orderStatusError =
+                                    "Paper lifecycle persistence failed safely; reset remains blocked.",
+                            )
+                        }
+                        return@launch
+                    }
+                    when (persisted) {
+                        is PaperOrderLifecyclePersistResult.Persisted -> _uiState.update {
+                            it.copy(
+                                reconciliation = persisted.snapshot,
+                                reconciliationRestoreComplete = true,
+                                isRefreshingOrderStatus = false,
+                                orderStatusError = null,
+                            )
+                        }
+                        is PaperOrderLifecyclePersistResult.Blocked -> _uiState.update {
+                            it.copy(
+                                reconciliation = persisted.snapshot,
+                                reconciliationRestoreComplete = true,
+                                isRefreshingOrderStatus = false,
+                                orderStatusError = persisted.issues.safeReconciliationMessage(
+                                    "Paper lifecycle was not persisted; reset remains blocked.",
+                                ),
+                            )
+                        }
+                    }
                 }
                 else -> _uiState.update {
                     it.copy(
-                        orderStatusCheckedAtEpochMillis = now,
                         isRefreshingOrderStatus = false,
                         orderStatusError = result.safeStatusError(),
-                        newPreparationAllowed = false,
                     )
                 }
             }
@@ -426,15 +458,73 @@ class PaperManualSubmitViewModel(
      */
     fun canResetForNewPreparation(): Boolean {
         val current = _uiState.value
-        return current.lastResult != null && current.newPreparationAllowed &&
-            current.orderTrackingRestoreComplete && !current.untrackableSubmittedOrder &&
+        val terminalReset = current.resetEligibleAttemptId != null
+        val safeLocalReset = current.lastResult?.mayResetWithoutLifecycleLookup() == true &&
+            current.reconciliation?.preparationAllowed == true
+        return (terminalReset || safeLocalReset) && current.reconciliationRestoreComplete &&
             !current.sessionArmed && !current.isSubmitting && !current.isRefreshing &&
-            !current.isRefreshingOrderStatus
+            !current.isRefreshingOrderStatus && !current.isResettingReconciliation
     }
 
-    fun resetForNewPreparation(): Boolean {
+    fun resetForNewPreparation(onResetCommitted: () -> Unit = {}) {
         val current = _uiState.value
-        if (!canResetForNewPreparation()) return false
+        if (!canResetForNewPreparation()) return
+        val terminalAttemptId = current.resetEligibleAttemptId
+        _uiState.update { it.copy(isResettingReconciliation = true, orderStatusError = null) }
+        viewModelScope.launch {
+            val reconciled = if (terminalAttemptId != null) {
+                val result = try {
+                    orderStatusTrackerRepository.acknowledgeTerminalReset(
+                        terminalAttemptId,
+                        clock().toEpochMilli(),
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    _uiState.update {
+                        it.copy(
+                            isResettingReconciliation = false,
+                            orderStatusError =
+                                "Terminal Paper reset persistence failed safely; preparation remains blocked.",
+                        )
+                    }
+                    return@launch
+                }
+                when (result) {
+                    is PaperOrderResetAcknowledgementResult.Acknowledged -> result.snapshot
+                    is PaperOrderResetAcknowledgementResult.Blocked -> {
+                        _uiState.update {
+                            it.copy(
+                                reconciliation = result.snapshot,
+                                reconciliationRestoreComplete = true,
+                                isResettingReconciliation = false,
+                                orderStatusError =
+                                    "Terminal Paper reset was not persisted; preparation " +
+                                        "remains blocked.",
+                            )
+                        }
+                        return@launch
+                    }
+                }
+            } else {
+                current.reconciliation ?: run {
+                    _uiState.update {
+                        it.copy(
+                            reconciliationRestoreComplete = true,
+                            isResettingReconciliation = false,
+                            orderStatusError =
+                                "Local Paper reset remained blocked by reconciliation.",
+                        )
+                    }
+                    return@launch
+                }
+            }
+            clearActivePreparation(reconciled)
+            onResetCommitted()
+        }
+    }
+
+    private fun clearActivePreparation(reconciled: PaperOrderReconciliationSnapshot) {
         tokenStore.invalidate()
         confirmation = null
         request = null
@@ -449,73 +539,45 @@ class PaperManualSubmitViewModel(
         reviewQueueMatch = false
         _uiState.value = PaperManualSubmitUiState.initial(featureGate.compileTimeEnabled).copy(
             realLocked = appState.realModeLocked,
-            trackedOrder = current.trackedOrder,
-            orderStatusSnapshot = current.orderStatusSnapshot,
-            orderStatusCheckedAtEpochMillis = current.orderStatusCheckedAtEpochMillis,
-            orderStatusError = current.orderStatusError,
-            newPreparationAllowed = current.newPreparationAllowed,
-            orderTrackingRestoreComplete = current.orderTrackingRestoreComplete,
-            untrackableSubmittedOrder = current.untrackableSubmittedOrder,
+            reconciliation = reconciled,
+            reconciliationRestoreComplete = true,
+            isRefreshingOrderStatus = false,
+            isResettingReconciliation = false,
+            orderStatusError = null,
         )
-        return true
     }
 
-    private fun restoreLatestSubmittedOrder() {
+    private fun restorePersistentReconciliation() {
         viewModelScope.launch {
             val restored = try {
-                orderStatusTrackerRepository.latestUnresolved()
+                orderStatusTrackerRepository.consolidateFromAudit()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 _uiState.update { current ->
-                    if (current.orderTrackingRestoreComplete) current
+                    if (current.reconciliationRestoreComplete) current
                     else current.copy(
-                        orderTrackingRestoreComplete = false,
-                        untrackableSubmittedOrder = true,
+                        reconciliation = null,
+                        reconciliationRestoreComplete = true,
                         orderStatusError =
                             "Local Paper audit could not be restored; new attempts remain blocked.",
-                        newPreparationAllowed = false,
                     )
                 }
                 return@launch
             }
             _uiState.update { current ->
-                if (current.orderTrackingRestoreComplete) return@update current
-                when (restored) {
-                    PaperOrderTrackingRestoreResult.None -> current.copy(
-                        orderTrackingRestoreComplete = true,
-                        untrackableSubmittedOrder = false,
-                        orderStatusError = null,
-                    )
-                    is PaperOrderTrackingRestoreResult.Trackable -> current.copy(
-                        trackedOrder = restored.order,
-                        orderStatusSnapshot = null,
-                        orderStatusCheckedAtEpochMillis = null,
-                        orderStatusError = null,
-                        newPreparationAllowed = false,
-                        orderTrackingRestoreComplete = true,
-                        untrackableSubmittedOrder = false,
-                    )
-                    is PaperOrderTrackingRestoreResult.Untrackable -> current.copy(
-                        trackedOrder = null,
-                        orderStatusSnapshot = null,
-                        orderStatusCheckedAtEpochMillis = null,
-                        orderStatusError =
-                            "The latest Paper attempt cannot be tracked safely. " +
-                                "New attempts remain blocked.",
-                        newPreparationAllowed = false,
-                        orderTrackingRestoreComplete = true,
-                        untrackableSubmittedOrder = true,
-                    )
-                }
+                if (current.reconciliationRestoreComplete) return@update current
+                current.copy(
+                    reconciliation = restored,
+                    reconciliationRestoreComplete = true,
+                    orderStatusError = null,
+                )
             }
         }
     }
 
     private fun hasUnresolvedTrackedOrder(): Boolean =
-        !_uiState.value.orderTrackingRestoreComplete ||
-            _uiState.value.untrackableSubmittedOrder ||
-            (_uiState.value.trackedOrder != null && !_uiState.value.newPreparationAllowed)
+        _uiState.value.blocksNewPaperPreparation
 
     private fun recomputeGate(nowEpochMillis: Long = clock().toEpochMilli()) {
         val decision = gate.evaluate(gateInput(nowEpochMillis))
@@ -584,23 +646,6 @@ private fun PaperOrderPayloadPreview.previewUnitPriceUsd(): Double? {
     return (notional / quantity).takeIf { it.isFinite() && it > 0.0 }
 }
 
-private fun PaperOrderSubmitResult.toTrackedPaperOrder(
-    preview: PaperOrderPayloadPreview,
-): TrackedPaperOrder? {
-    val orderId = alpacaOrderId ?: return null
-    if (!AlpacaPaperOrderStatusEndpoint.isCanonicalOrderId(orderId)) return null
-    return TrackedPaperOrder(
-        orderId = orderId,
-        submitAttemptId = submitAttemptId,
-        previewId = previewId,
-        clientOrderId = clientOrderId,
-        symbol = preview.symbol,
-        side = preview.side.name,
-        quantity = preview.quantity,
-        submittedAtEpochMillis = submittedAtEpochMillis,
-    )
-}
-
 private fun PaperOrderSubmitResult.mayResetWithoutLifecycleLookup(): Boolean = when (status) {
     PaperOrderSubmitStatus.BLOCKED,
     PaperOrderSubmitStatus.REJECTED,
@@ -608,15 +653,6 @@ private fun PaperOrderSubmitResult.mayResetWithoutLifecycleLookup(): Boolean = w
     PaperOrderSubmitStatus.FAILED ->
         errorCode == com.vela.android.lab.data.paper.submit.PaperOrderSubmitError.AUDIT_WRITE_FAILED
     PaperOrderSubmitStatus.SUBMITTED -> false
-}
-
-private fun PaperOrderLifecycleStatus.allowsNewPreparation(): Boolean = when (this) {
-    PaperOrderLifecycleStatus.FILLED,
-    PaperOrderLifecycleStatus.CANCELED,
-    PaperOrderLifecycleStatus.EXPIRED,
-    PaperOrderLifecycleStatus.REJECTED,
-    -> true
-    else -> false
 }
 
 private fun AlpacaPaperOrderStatusReadOnlyClient.FetchResult.safeStatusError(): String = when (this) {
@@ -629,10 +665,18 @@ private fun AlpacaPaperOrderStatusReadOnlyClient.FetchResult.safeStatusError(): 
     AlpacaPaperOrderStatusReadOnlyClient.FetchResult.NetworkError ->
         "Alpaca Paper status lookup failed on the network; no retry was attempted."
     is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ParseError -> safeMessage
-    AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ResponseIdMismatch ->
-        "Alpaca Paper status response did not match the tracked order."
+    AlpacaPaperOrderStatusReadOnlyClient.FetchResult.ResponseIdentityMismatch ->
+        "Alpaca Paper status response identity did not match the tracked order."
     is AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok ->
         "Paper order status lookup completed."
+}
+
+private fun Set<PaperOrderReconciliationIssue>.safeReconciliationMessage(
+    prefix: String,
+): String = if (isEmpty()) {
+    prefix
+} else {
+    "$prefix ${map(PaperOrderReconciliationIssue::name).sorted().joinToString(", ")}"
 }
 
 private fun PaperManualSubmitUiState.withFinalPriceEvaluation(
