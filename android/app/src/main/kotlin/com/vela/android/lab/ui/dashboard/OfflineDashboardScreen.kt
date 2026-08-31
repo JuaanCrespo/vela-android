@@ -240,6 +240,12 @@ fun OfflineDashboardScreen(
                 paperManualSubmitViewModel?.onConfirmationInputChange(it)
             },
             manualPaperAction = { paperManualSubmitViewModel?.submitOnce() },
+            manualPaperSelectOrderForStatus = { attemptId ->
+                paperManualSubmitViewModel?.selectOrderForStatusLookup(attemptId)
+            },
+            manualPaperClearOrderStatusSelection = {
+                paperManualSubmitViewModel?.clearOrderStatusSelection()
+            },
             manualPaperRefreshOrderStatus = {
                 paperManualSubmitViewModel?.refreshOrderStatus()
             },
@@ -515,6 +521,8 @@ internal fun PaperManualSubmitCard(
     onWarningAccepted: (Boolean) -> Unit,
     onConfirmationChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onSelectOrderForStatus: (String) -> Unit = {},
+    onClearOrderStatusSelection: () -> Unit = {},
     onRefreshOrderStatus: () -> Unit = {},
     onNewPreparation: () -> Unit = {},
 ) {
@@ -568,7 +576,6 @@ internal fun PaperManualSubmitCard(
                 onWarningAccepted = onWarningAccepted,
                 onConfirmationChange = onConfirmationChange,
                 onSubmit = onSubmit,
-                onRefreshOrderStatus = onRefreshOrderStatus,
                 onNewPreparation = onNewPreparation,
             )
             OutlinedButton(
@@ -645,6 +652,12 @@ internal fun PaperManualSubmitCard(
             state.reconciliation?.let { reconciliation ->
                 LabeledRow("Verdict", reconciliation.verdict.name)
                 LabeledRow("Candidates", reconciliation.candidates.size.toString())
+                Text(
+                    text = "Resolved ${state.resolvedOrderCount} / " +
+                        "Unresolved ${state.unresolvedOrderCount} / " +
+                        "Ambiguous ${state.ambiguousOrderCount}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 if (reconciliation.issues.isNotEmpty()) {
                     Text(
                         "Razones: ${reconciliation.issues.joinToString { it.name }}",
@@ -652,9 +665,21 @@ internal fun PaperManualSubmitCard(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                reconciliation.candidates.forEachIndexed { index, candidate ->
-                    SectionTitle("Identidad ${index + 1}")
-                    LabeledRow("Mapping", if (candidate.mappingExact) "EXACT" else "AMBIGUOUS")
+                val selectionAllowed = state.reconciliationUiStatus ==
+                    PaperOrderReconciliationUiStatus.EXACT_UNRESOLVED ||
+                    state.reconciliationUiStatus == PaperOrderReconciliationUiStatus.MULTIPLE
+                val exactUnresolved = reconciliation.exactUnresolvedCandidates
+                if (exactUnresolved.isEmpty()) {
+                    Text(
+                        text = "No hay órdenes exactas sin resolver seleccionables.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                exactUnresolved.forEachIndexed { index, candidate ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SectionTitle("Orden exacta sin resolver ${index + 1}")
+                    LabeledRow("Mapping", "EXACT")
                     LabeledRow("Attempt id", candidate.submitAttemptId)
                     LabeledRow("Attempt audit row", candidate.attemptStartedAuditEntryId?.toString() ?: "—")
                     LabeledRow("Result audit row", candidate.submitResultAuditEntryId?.toString() ?: "—")
@@ -662,19 +687,98 @@ internal fun PaperManualSubmitCard(
                     LabeledRow("Linked dry-run id", candidate.linkedClientDryRunId ?: "—")
                     LabeledRow("Paper order id", candidate.orderId ?: "—")
                     LabeledRow("Client order id", candidate.clientOrderId ?: "—")
-                    LabeledRow("Order", listOfNotNull(candidate.symbol, candidate.side, candidate.quantity?.toString(), candidate.orderType, candidate.timeInForce).joinToString(" · ").ifBlank { "—" })
+                    LabeledRow("Symbol", candidate.symbol ?: "—")
+                    LabeledRow("Side", candidate.side ?: "—")
+                    LabeledRow("Qty", candidate.quantity?.toString() ?: "—")
+                    LabeledRow("Type", candidate.orderType ?: "—")
+                    LabeledRow("TIF", candidate.timeInForce ?: "—")
                     LabeledRow("Submitted at", formatEpochMillis(candidate.submittedAtEpochMillis))
                     LabeledRow("Local result", candidate.localSubmitResult ?: "—")
                     LabeledRow("Lifecycle", candidate.latestLifecycleSnapshot?.displayStatus ?: candidate.lifecycleHistory.lastOrNull()?.status ?: "NO CONSULTADO")
                     LabeledRow("Lifecycle observations", candidate.lifecycleHistory.size.toString())
-                    LabeledRow("Última observación", formatEpochMillis(candidate.lifecycleObservedAtEpochMillis))
+                    LabeledRow(
+                        "Última observación",
+                        formatEpochMillis(candidate.lifecycleObservedAtEpochMillis),
+                    )
                     LabeledRow(
                         "Reset acknowledged at",
                         formatEpochMillis(candidate.resetAcknowledgedAtEpochMillis),
                     )
                     candidate.latestLifecycleSnapshot?.let { lifecycle ->
                         LabeledRow("Cantidad ejecutada", lifecycle.filledQuantity.toString())
-                        LabeledRow("Precio promedio ejecutado", formatPrice(lifecycle.filledAveragePriceUsd))
+                        LabeledRow(
+                            "Precio promedio ejecutado",
+                            formatPrice(lifecycle.filledAveragePriceUsd),
+                        )
+                        LabeledRow("Ejecutada en", lifecycle.filledAtIso ?: "—")
+                    }
+                    val selected = state.selectedOrderLookupTarget?.submitAttemptId ==
+                        candidate.submitAttemptId
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onSelectOrderForStatus(candidate.submitAttemptId) },
+                        enabled = selectionAllowed && !state.sessionArmed && !selected &&
+                            !state.isSubmitting &&
+                            !state.isRefreshingOrderStatus &&
+                            !state.isResettingReconciliation,
+                    ) {
+                        Text(
+                            if (selected) "Seleccionada para consulta GET"
+                            else "Seleccionar para consulta GET",
+                        )
+                    }
+                }
+                val readOnlyCandidates = reconciliation.candidates
+                    .filter { it.manualLookupTarget == null }
+                    .sortedBy { it.submitAttemptId }
+                readOnlyCandidates.forEachIndexed { index, candidate ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SectionTitle("Evidencia local no seleccionable ${index + 1}")
+                    LabeledRow(
+                        "Mapping",
+                        if (candidate.mappingExact) "EXACT" else "AMBIGUOUS",
+                    )
+                    LabeledRow("Attempt id", candidate.submitAttemptId)
+                    LabeledRow(
+                        "Attempt audit row",
+                        candidate.attemptStartedAuditEntryId?.toString() ?: "—",
+                    )
+                    LabeledRow(
+                        "Result audit row",
+                        candidate.submitResultAuditEntryId?.toString() ?: "—",
+                    )
+                    LabeledRow("Preview id", candidate.previewId ?: "—")
+                    LabeledRow("Linked dry-run id", candidate.linkedClientDryRunId ?: "—")
+                    LabeledRow("Paper order id", candidate.orderId ?: "—")
+                    LabeledRow("Client order id", candidate.clientOrderId ?: "—")
+                    LabeledRow("Symbol", candidate.symbol ?: "—")
+                    LabeledRow("Side", candidate.side ?: "—")
+                    LabeledRow("Qty", candidate.quantity?.toString() ?: "—")
+                    LabeledRow("Type", candidate.orderType ?: "—")
+                    LabeledRow("TIF", candidate.timeInForce ?: "—")
+                    LabeledRow("Submitted at", formatEpochMillis(candidate.submittedAtEpochMillis))
+                    LabeledRow("Local result", candidate.localSubmitResult ?: "—")
+                    LabeledRow(
+                        "Lifecycle",
+                        candidate.latestLifecycleSnapshot?.displayStatus
+                            ?: candidate.lifecycleHistory.lastOrNull()?.status
+                            ?: "NO CONSULTADO",
+                    )
+                    LabeledRow("Lifecycle observations", candidate.lifecycleHistory.size.toString())
+                    LabeledRow(
+                        "Última observación",
+                        formatEpochMillis(candidate.lifecycleObservedAtEpochMillis),
+                    )
+                    LabeledRow(
+                        "Reset acknowledged at",
+                        formatEpochMillis(candidate.resetAcknowledgedAtEpochMillis),
+                    )
+                    candidate.latestLifecycleSnapshot?.let { lifecycle ->
+                        LabeledRow("Cantidad ejecutada", lifecycle.filledQuantity.toString())
+                        LabeledRow(
+                            "Precio promedio ejecutado",
+                            formatPrice(lifecycle.filledAveragePriceUsd),
+                        )
                         LabeledRow("Ejecutada en", lifecycle.filledAtIso ?: "—")
                     }
                     if (candidate.issues.isNotEmpty()) {
@@ -686,6 +790,42 @@ internal fun PaperManualSubmitCard(
                     }
                 }
             }
+            state.selectedOrderLookupTarget?.let { selected ->
+                Spacer(modifier = Modifier.height(8.dp))
+                SectionTitle("Orden seleccionada para consulta GET")
+                LabeledRow("Selected attempt id", selected.submitAttemptId)
+                LabeledRow("Selected Paper order id", selected.orderId)
+                Text(
+                    text = "La selección es local y temporal. El GET requiere este botón.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onRefreshOrderStatus,
+                    enabled = state.canRefreshSelectedExactOrder &&
+                        !state.sessionArmed && !state.isRefreshingOrderStatus &&
+                        !state.isSubmitting &&
+                        !state.isResettingReconciliation,
+                ) {
+                    Text(
+                        if (state.isRefreshingOrderStatus) "Consultando estado Alpaca…"
+                        else "Consultar estado Alpaca · solo GET",
+                    )
+                }
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onClearOrderStatusSelection,
+                    enabled = !state.isRefreshingOrderStatus && !state.isSubmitting &&
+                        !state.isResettingReconciliation,
+                ) {
+                    Text("Quitar selección")
+                }
+            } ?: Text(
+                text = "Orden seleccionada para consulta GET: NINGUNA",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             state.orderStatusError?.let { error ->
                 Text(
                     text = error,
@@ -713,7 +853,6 @@ private fun PaperManualSubmitControls(
     onWarningAccepted: (Boolean) -> Unit,
     onConfirmationChange: (String) -> Unit,
     onSubmit: () -> Unit,
-    onRefreshOrderStatus: () -> Unit,
     onNewPreparation: () -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
@@ -748,6 +887,26 @@ private fun PaperManualSubmitControls(
         )
         return
     }
+    if (!state.sessionArmed && state.canAcknowledgeAllTerminalResets) {
+        Text(
+            "Todos los estados terminales están persistidos. Confirmá manualmente el " +
+                "reset local para preparar otra orden.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onNewPreparation,
+            enabled = !state.isSubmitting && !state.isRefreshingOrderStatus &&
+                !state.isResettingReconciliation,
+        ) {
+            Text(
+                if (state.isResettingReconciliation) "Guardando reset local…"
+                else "Preparar otra orden Paper",
+            )
+        }
+        return
+    }
     if (!state.sessionArmed && state.lastResult == null &&
         state.untrackableSubmittedOrder
     ) {
@@ -770,45 +929,12 @@ private fun PaperManualSubmitControls(
         return
     }
     if (!state.sessionArmed) {
-        if (state.resetEligibleAttemptId != null) {
-            Text(
-                "El estado terminal está persistido. Confirmá manualmente el reset local " +
-                    "para preparar otra orden.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onNewPreparation,
-                enabled = !state.isSubmitting && !state.isRefreshingOrderStatus &&
-                    !state.isResettingReconciliation,
-            ) {
-                Text(
-                    if (state.isResettingReconciliation) "Guardando reset local…"
-                    else "Preparar otra orden Paper",
-                )
-            }
-            return
-        }
         if (state.lastResult != null) {
             Text(
                 "Intento finalizado. La preview anterior no se reutiliza.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (state.canRefreshSingleExactOrder) {
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onRefreshOrderStatus,
-                    enabled = !state.isRefreshingOrderStatus && !state.isSubmitting &&
-                        !state.isResettingReconciliation,
-                ) {
-                    Text(
-                        if (state.isRefreshingOrderStatus) "Consultando estado Alpaca…"
-                        else "Consultar estado Alpaca · solo GET",
-                    )
-                }
-            }
             if (state.newPreparationAllowed) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
@@ -827,24 +953,6 @@ private fun PaperManualSubmitControls(
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            return
-        }
-        if (state.canRefreshSingleExactOrder) {
-            Text(
-                "Hay una orden Paper enviada cuyo estado final todavía no fue verificado.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onRefreshOrderStatus,
-                enabled = !state.isRefreshingOrderStatus,
-            ) {
-                Text(
-                    if (state.isRefreshingOrderStatus) "Consultando estado Alpaca…"
-                    else "Consultar estado Alpaca · solo GET",
                 )
             }
             return

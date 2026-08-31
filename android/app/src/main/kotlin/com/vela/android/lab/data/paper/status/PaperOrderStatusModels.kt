@@ -82,7 +82,9 @@ data class PaperOrderStatusSnapshot(
             }
         }
         if (status == PaperOrderLifecycleStatus.FILLED) {
-            require(filledQuantity > 0.0) { "FILLED requires a positive filled quantity." }
+            require(filledQuantity == quantity) {
+                "FILLED requires the filled quantity to equal the order quantity."
+            }
             require(filledAveragePriceUsd != null) { "FILLED requires an average price." }
             require(filledAtIso != null) { "FILLED requires a filled timestamp." }
         }

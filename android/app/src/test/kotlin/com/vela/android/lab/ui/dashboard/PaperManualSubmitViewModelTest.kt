@@ -18,6 +18,7 @@ import com.vela.android.lab.data.paper.status.AlpacaPaperOrderStatusHttpClient
 import com.vela.android.lab.data.paper.status.AlpacaPaperOrderStatusReadOnlyClient
 import com.vela.android.lab.data.paper.status.PaperOrderLifecycleStatus
 import com.vela.android.lab.data.paper.status.PaperOrderLifecycleLookupResult
+import com.vela.android.lab.data.paper.status.PaperOrderLifecycleLookupTarget
 import com.vela.android.lab.data.paper.status.PaperOrderLifecyclePersistResult
 import com.vela.android.lab.data.paper.status.PaperOrderReconciliationIssue
 import com.vela.android.lab.data.paper.status.PaperOrderReconciliationSnapshot
@@ -388,10 +389,12 @@ class PaperManualSubmitViewModelTest {
         assertEquals(1, fixture.submitHttp.callCount)
 
         fixture.statusHttp.response = filledStatusResponse(clientOrderId = "vela-client-vm")
+        selectOnlyExactUnresolved(fixture)
         fixture.vm.refreshOrderStatus()
 
         val filled = fixture.vm.uiState.value
         assertEquals(PaperOrderLifecycleStatus.FILLED, filled.orderStatusSnapshot?.status)
+        assertEquals(null, filled.selectedOrderLookupTarget)
         assertEquals(1.0, filled.orderStatusSnapshot?.filledQuantity)
         assertEquals(501.25, filled.orderStatusSnapshot?.filledAveragePriceUsd)
         assertFalse(filled.newPreparationAllowed)
@@ -438,6 +441,7 @@ class PaperManualSubmitViewModelTest {
         fixture.statusHttp.response = nonterminalStatusResponse(
             clientOrderId = submitTestRequest().clientOrderId,
         )
+        selectOnlyExactUnresolved(fixture)
         fixture.vm.refreshOrderStatus()
         assertEquals(1, fixture.statusHttp.callCount)
         assertEquals(PaperOrderLifecycleStatus.NEW, fixture.vm.uiState.value.orderStatusSnapshot?.status)
@@ -497,6 +501,7 @@ class PaperManualSubmitViewModelTest {
         fixture.statusHttp.response = filledStatusResponse(
             clientOrderId = submitTestRequest().clientOrderId,
         )
+        selectOnlyExactUnresolved(fixture)
         fixture.vm.refreshOrderStatus()
         assertTrue(fixture.vm.canResetForNewPreparation())
         fixture.vm.resetForNewPreparation()
@@ -542,6 +547,7 @@ class PaperManualSubmitViewModelTest {
         val blocker = CompletableDeferred<Unit>()
         fixture.statusHttp.blocker = blocker
 
+        selectOnlyExactUnresolved(fixture)
         fixture.vm.refreshOrderStatus()
         fixture.vm.refreshOrderStatus()
 
@@ -587,11 +593,13 @@ class PaperManualSubmitViewModelTest {
             "APCA-API-SECRET-KEY=must-not-escape",
         )
 
+        selectOnlyExactUnresolved(fixture)
         fixture.vm.refreshOrderStatus()
 
         val state = fixture.vm.uiState.value
         assertEquals(1, fixture.statusHttp.callCount)
         assertFalse(state.isRefreshingOrderStatus)
+        assertEquals(null, state.selectedOrderLookupTarget)
         assertFalse(state.newPreparationAllowed)
         assertFalse(state.orderStatusError.orEmpty().contains("must-not-escape"))
     }
@@ -602,6 +610,7 @@ class PaperManualSubmitViewModelTest {
         first.statusHttp.response = filledStatusResponse(
             clientOrderId = submitTestRequest().clientOrderId,
         )
+        selectOnlyExactUnresolved(first)
         first.vm.refreshOrderStatus()
         val auditBeforeRestart = first.auditDao.rows.toList()
         val historyBeforeRestart = first.vm.uiState.value.trackedOrder?.lifecycleHistory
@@ -660,6 +669,10 @@ class PaperManualSubmitViewModelTest {
 
             fixture.vm.armSession()
             assertFalse(fixture.vm.uiState.value.sessionArmed, snapshot.verdict.name)
+            if (snapshot.verdict == PaperOrderReconciliationVerdict.AMBIGUOUS) {
+                fixture.vm.selectOrderForStatusLookup(snapshot.candidates.single().submitAttemptId)
+                assertEquals(null, fixture.vm.uiState.value.selectedOrderLookupTarget)
+            }
             if (snapshot.verdict != PaperOrderReconciliationVerdict.SINGLE_UNRESOLVED) {
                 fixture.vm.refreshOrderStatus()
                 assertEquals(0, source.lookupCount, snapshot.verdict.name)
@@ -680,6 +693,9 @@ class PaperManualSubmitViewModelTest {
 
         assertEquals(0, fixture.statusHttp.callCount)
         fixture.vm.refreshOrderStatus()
+        assertEquals(0, fixture.statusHttp.callCount)
+        selectOnlyExactUnresolved(fixture)
+        fixture.vm.refreshOrderStatus()
         advanceUntilIdle()
 
         assertEquals(1, fixture.statusHttp.callCount)
@@ -689,8 +705,164 @@ class PaperManualSubmitViewModelTest {
         )
         assertEquals(PaperOrderLifecycleStatus.NEW,
             fixture.vm.uiState.value.orderStatusSnapshot?.status)
+        assertEquals(null, fixture.vm.uiState.value.selectedOrderLookupTarget)
         assertFalse(fixture.vm.uiState.value.newPreparationAllowed)
         assertEquals(0, fixture.submitHttp.callCount)
+    }
+
+    @Test
+    fun multipleOrdersRequireExplicitSelectionAndEachGetUsesOnlyThatExactIdentity() = runTest {
+        val snapshot = multipleUnresolvedReconciliation()
+        val source = SubmitVmTrackingSource(
+            snapshot = snapshot,
+            allowExactLifecycle = true,
+        )
+        val fixture = fixture(
+            compileEnabled = true,
+            trackingSourceOverride = source,
+        )
+
+        val initial = fixture.vm.uiState.value
+        assertEquals(0, initial.resolvedOrderCount)
+        assertEquals(2, initial.unresolvedOrderCount)
+        assertEquals(0, initial.ambiguousOrderCount)
+        assertEquals(null, initial.selectedOrderLookupTarget)
+        fixture.vm.refreshOrderStatus()
+        assertEquals(0, source.lookupCount)
+        assertEquals(0, fixture.statusHttp.callCount)
+
+        fixture.vm.selectOrderForStatusLookup("unknown-attempt")
+        assertEquals(null, fixture.vm.uiState.value.selectedOrderLookupTarget)
+
+        fixture.vm.selectOrderForStatusLookup("attempt-2")
+        assertEquals(SECOND_ORDER_ID,
+            fixture.vm.uiState.value.selectedOrderLookupTarget?.orderId)
+        assertEquals(0, fixture.statusHttp.callCount)
+        fixture.statusHttp.response = nonterminalStatusResponse(
+            clientOrderId = "client-2",
+            orderId = SECOND_ORDER_ID,
+        )
+        fixture.vm.refreshOrderStatus()
+        advanceUntilIdle()
+
+        assertEquals(1, fixture.statusHttp.callCount)
+        assertEquals(1, source.persistCount)
+        assertEquals(
+            AlpacaPaperOrderStatusEndpoint.urlFor(SECOND_ORDER_ID),
+            fixture.statusHttp.urls.single(),
+        )
+        assertEquals(null, fixture.vm.uiState.value.selectedOrderLookupTarget)
+        fixture.vm.refreshOrderStatus()
+        assertEquals(1, fixture.statusHttp.callCount)
+
+        fixture.vm.selectOrderForStatusLookup("attempt-1")
+        fixture.statusHttp.response = nonterminalStatusResponse(
+            clientOrderId = "client-1",
+            orderId = TEST_ORDER_ID,
+        )
+        fixture.vm.refreshOrderStatus()
+        advanceUntilIdle()
+
+        assertEquals(2, fixture.statusHttp.callCount)
+        assertEquals(2, source.persistCount)
+        assertEquals(
+            listOf(
+                AlpacaPaperOrderStatusEndpoint.urlFor(SECOND_ORDER_ID),
+                AlpacaPaperOrderStatusEndpoint.urlFor(TEST_ORDER_ID),
+            ),
+            fixture.statusHttp.urls,
+        )
+        assertEquals(null, fixture.vm.uiState.value.selectedOrderLookupTarget)
+        assertEquals(0, fixture.submitHttp.callCount)
+    }
+
+    @Test
+    fun terminalAFromTwoLeavesBUnresolvedUnselectedAndDoesNotTriggerAnotherGet() = runTest {
+        val initial = multipleUnresolvedReconciliation()
+        val targetA = initial.exactUnresolvedCandidates.first {
+            it.submitAttemptId == "attempt-1"
+        }.manualLookupTarget!!
+        val terminalA = PaperOrderStatusSnapshot(
+            orderId = targetA.orderId,
+            clientOrderId = targetA.clientOrderId!!,
+            symbol = targetA.symbol,
+            side = targetA.side,
+            quantity = targetA.quantity,
+            orderType = targetA.orderType,
+            timeInForce = targetA.timeInForce,
+            status = PaperOrderLifecycleStatus.FILLED,
+            rawStatus = "filled",
+            filledQuantity = targetA.quantity,
+            filledAveragePriceUsd = 773.49,
+            filledAtIso = "2026-08-07T19:31:02Z",
+        )
+        val afterTerminalA = PaperOrderReconciliationSnapshot(
+            verdict = PaperOrderReconciliationVerdict.SINGLE_UNRESOLVED,
+            candidates = initial.candidates.map { candidate ->
+                if (candidate.submitAttemptId == "attempt-1") {
+                    candidate.copy(
+                        latestLifecycleSnapshot = terminalA,
+                        lifecycleObservedAtEpochMillis = 10_001L,
+                        terminal = true,
+                    )
+                } else {
+                    candidate
+                }
+            },
+            issues = emptySet(),
+        )
+        val source = SubmitVmTrackingSource(
+            snapshot = initial,
+            allowExactLifecycle = true,
+            snapshotAfterPersist = afterTerminalA,
+        )
+        val fixture = fixture(
+            compileEnabled = true,
+            trackingSourceOverride = source,
+        )
+        fixture.statusHttp.response = filledStatusResponse(
+            clientOrderId = targetA.clientOrderId,
+        )
+
+        fixture.vm.selectOrderForStatusLookup("attempt-1")
+        fixture.vm.refreshOrderStatus()
+        advanceUntilIdle()
+
+        val state = fixture.vm.uiState.value
+        assertEquals(1, state.resolvedOrderCount)
+        assertEquals(1, state.unresolvedOrderCount)
+        assertEquals(
+            listOf("attempt-2"),
+            state.reconciliation?.exactUnresolvedCandidates?.map { it.submitAttemptId },
+        )
+        assertEquals(null, state.selectedOrderLookupTarget)
+        assertEquals(1, fixture.statusHttp.callCount)
+        assertEquals(1, source.lookupCount)
+        assertEquals(1, source.persistCount)
+        advanceUntilIdle()
+        assertEquals(1, fixture.statusHttp.callCount)
+        assertEquals(0, fixture.submitHttp.callCount)
+    }
+
+    @Test
+    fun exactSelectionIsNotRestoredAndCannotAuthorizeGetAfterViewModelRecreation() = runTest {
+        val first = fixture(compileEnabled = true, preloadSubmittedOrder = true)
+        selectOnlyExactUnresolved(first)
+        assertNotNull(first.vm.uiState.value.selectedOrderLookupTarget)
+        assertEquals(0, first.statusHttp.callCount)
+
+        val recreated = fixture(
+            compileEnabled = true,
+            auditDaoOverride = first.auditDao,
+            reconciliationDaoOverride = first.reconciliationDao,
+        )
+
+        assertEquals(PaperOrderReconciliationUiStatus.EXACT_UNRESOLVED,
+            recreated.vm.uiState.value.reconciliationUiStatus)
+        assertEquals(null, recreated.vm.uiState.value.selectedOrderLookupTarget)
+        recreated.vm.refreshOrderStatus()
+        assertEquals(0, recreated.statusHttp.callCount)
+        assertEquals(0, recreated.submitHttp.callCount)
     }
 
     @Test
@@ -702,6 +874,7 @@ class PaperManualSubmitViewModelTest {
             clientOrderId = submitTestRequest().clientOrderId,
         )
 
+        selectOnlyExactUnresolved(fixture)
         fixture.vm.refreshOrderStatus()
 
         val state = fixture.vm.uiState.value
@@ -709,6 +882,7 @@ class PaperManualSubmitViewModelTest {
         assertEquals(countBefore, fixture.reconciliationDao.lifecycleObservationCount())
         assertEquals(PaperOrderReconciliationUiStatus.EXACT_UNRESOLVED,
             state.reconciliationUiStatus)
+        assertEquals(null, state.selectedOrderLookupTarget)
         assertEquals(null, state.orderStatusSnapshot)
         assertFalse(state.newPreparationAllowed)
         assertFalse(fixture.vm.canResetForNewPreparation())
@@ -725,6 +899,7 @@ class PaperManualSubmitViewModelTest {
         )
         prepareConfirmAndSubmit(fixture)
         fixture.statusHttp.response = filledStatusResponse(clientOrderId = "vela-client-vm")
+        selectOnlyExactUnresolved(fixture)
         fixture.vm.refreshOrderStatus()
         val before = fixture.vm.uiState.value
         fixture.reconciliationDao.failResetAcknowledgement = true
@@ -756,6 +931,16 @@ class PaperManualSubmitViewModelTest {
         prepareAndArm(fixture)
         fixture.vm.onConfirmationInputChange(fixture.vm.uiState.value.requiredConfirmationText)
         fixture.vm.submitOnce()
+    }
+
+    private fun selectOnlyExactUnresolved(fixture: ViewModelFixture) {
+        val candidate = fixture.vm.uiState.value.reconciliation
+            ?.exactUnresolvedCandidates
+            ?.singleOrNull()
+        assertNotNull(candidate)
+        fixture.vm.selectOrderForStatusLookup(candidate!!.submitAttemptId)
+        assertEquals(candidate.manualLookupTarget,
+            fixture.vm.uiState.value.selectedOrderLookupTarget)
     }
 
     private fun fixture(
@@ -906,13 +1091,15 @@ private class SubmitVmIdSequence {
 }
 
 private const val TEST_ORDER_ID = "4b60549d-6dab-47d8-93eb-382ed1eed108"
+private const val SECOND_ORDER_ID = "d21f4ca1-5765-4d6a-8984-1f934c9183d2"
 
 private fun nonterminalStatusResponse(
     clientOrderId: String,
+    orderId: String = TEST_ORDER_ID,
 ): PaperOrderStatusHttpResult = PaperOrderStatusHttpResult.Success(
     200,
     """{
-      "id":"$TEST_ORDER_ID","client_order_id":"$clientOrderId",
+      "id":"$orderId","client_order_id":"$clientOrderId",
       "symbol":"SPY","side":"buy","qty":"1","type":"market",
       "time_in_force":"day","status":"new","filled_qty":"0",
       "filled_avg_price":null,"filled_at":null
@@ -1022,28 +1209,43 @@ private class SubmitVmReconciliationDao : PaperOrderReconciliationDao {
 
     override suspend fun lifecycleObservationCount(): Int = observations.size
 
-    override suspend fun acknowledgeReset(
-        attemptId: String,
+    override suspend fun pendingTerminalResetAttemptIds(): List<String> =
+        reconciliations.values.filter {
+            it.terminal && it.mappingStatus == "EXACT" &&
+                it.localSubmitResult == "SUBMITTED" &&
+                it.resetAcknowledgedAtEpochMillis == null
+        }.map(PaperOrderReconciliationEntity::submitAttemptId).sorted()
+
+    override suspend fun acknowledgeTerminalResetsUnchecked(
+        attemptIds: List<String>,
         acknowledgedAtEpochMillis: Long,
     ): Int {
         if (failResetAcknowledgement) return 0
-        val current = reconciliations[attemptId] ?: return 0
-        if (!current.terminal || current.mappingStatus != "EXACT" ||
-            current.resetAcknowledgedAtEpochMillis != null
-        ) {
-            return 0
+        var updated = 0
+        attemptIds.forEach { attemptId ->
+            val current = reconciliations[attemptId] ?: return@forEach
+            if (!current.terminal || current.mappingStatus != "EXACT" ||
+                current.localSubmitResult != "SUBMITTED" ||
+                current.resetAcknowledgedAtEpochMillis != null
+            ) {
+                return@forEach
+            }
+            reconciliations[attemptId] = current.copy(
+                resetAcknowledgedAtEpochMillis = acknowledgedAtEpochMillis,
+            )
+            updated += 1
         }
-        reconciliations[attemptId] = current.copy(
-            resetAcknowledgedAtEpochMillis = acknowledgedAtEpochMillis,
-        )
-        return 1
+        return updated
     }
 }
 
 private class SubmitVmTrackingSource(
-    private val snapshot: PaperOrderReconciliationSnapshot,
+    private var snapshot: PaperOrderReconciliationSnapshot,
     private val consolidateBlocker: CompletableDeferred<Unit>? = null,
     private val consolidateFailure: RuntimeException? = null,
+    private val allowExactLifecycle: Boolean = false,
+    private val acknowledgedSnapshot: PaperOrderReconciliationSnapshot? = null,
+    private val snapshotAfterPersist: PaperOrderReconciliationSnapshot? = null,
 ) : PaperOrderTrackingSource {
     var lookupCount: Int = 0
     var persistCount: Int = 0
@@ -1055,8 +1257,17 @@ private class SubmitVmTrackingSource(
         return snapshot
     }
 
-    override suspend fun lookupTarget(): PaperOrderLifecycleLookupResult {
+    override suspend fun lookupTarget(
+        selectedTarget: PaperOrderLifecycleLookupTarget,
+    ): PaperOrderLifecycleLookupResult {
         lookupCount += 1
+        if (allowExactLifecycle &&
+            snapshot.exactUnresolvedCandidates.any {
+                it.manualLookupTarget == selectedTarget
+            }
+        ) {
+            return PaperOrderLifecycleLookupResult.Exact(selectedTarget)
+        }
         return PaperOrderLifecycleLookupResult.Blocked(snapshot.verdict, snapshot.issues)
     }
 
@@ -1067,17 +1278,26 @@ private class SubmitVmTrackingSource(
         observedAtEpochMillis: Long,
     ): PaperOrderLifecyclePersistResult {
         persistCount += 1
+        if (allowExactLifecycle &&
+            snapshot.exactUnresolvedCandidates.any { it.manualLookupTarget == target }
+        ) {
+            snapshotAfterPersist?.let { snapshot = it }
+            return PaperOrderLifecyclePersistResult.Persisted(snapshot)
+        }
         return PaperOrderLifecyclePersistResult.Blocked(
             snapshot,
             setOf(PaperOrderReconciliationIssue.PERSISTENCE_FAILED),
         )
     }
 
-    override suspend fun acknowledgeTerminalReset(
-        submitAttemptId: String,
+    override suspend fun acknowledgeAllTerminalResets(
         acknowledgedAtEpochMillis: Long,
     ): PaperOrderResetAcknowledgementResult {
         resetCount += 1
+        acknowledgedSnapshot?.let {
+            snapshot = it
+            return PaperOrderResetAcknowledgementResult.Acknowledged(it)
+        }
         return PaperOrderResetAcknowledgementResult.Blocked(snapshot)
     }
 }
@@ -1103,7 +1323,7 @@ private fun multipleUnresolvedReconciliation(): PaperOrderReconciliationSnapshot
             reconciledOrder("attempt-1", TEST_ORDER_ID, "client-1"),
             reconciledOrder(
                 "attempt-2",
-                "d21f4ca1-5765-4d6a-8984-1f934c9183d2",
+                SECOND_ORDER_ID,
                 "client-2",
             ),
         ),

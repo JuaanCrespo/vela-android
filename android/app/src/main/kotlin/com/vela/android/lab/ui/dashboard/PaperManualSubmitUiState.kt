@@ -3,6 +3,7 @@ package com.vela.android.lab.ui.dashboard
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitError
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitResult
 import com.vela.android.lab.data.paper.submit.PaperFinalPriceStabilityPolicy
+import com.vela.android.lab.data.paper.status.PaperOrderLifecycleLookupTarget
 import com.vela.android.lab.data.paper.status.PaperOrderReconciliationSnapshot
 import com.vela.android.lab.data.paper.status.PaperOrderReconciliationVerdict
 import com.vela.android.lab.data.paper.status.PaperOrderStatusSnapshot
@@ -64,6 +65,7 @@ data class PaperManualSubmitUiState(
     val lastError: String?,
     val reconciliation: PaperOrderReconciliationSnapshot?,
     val reconciliationRestoreComplete: Boolean,
+    val selectedOrderLookupTarget: PaperOrderLifecycleLookupTarget?,
     val isRefreshingOrderStatus: Boolean,
     val isResettingReconciliation: Boolean,
     val orderStatusError: String?,
@@ -89,7 +91,7 @@ data class PaperManualSubmitUiState(
                 PaperOrderReconciliationVerdict.MULTIPLE_UNRESOLVED_PAPER_ORDERS ->
                 PaperOrderReconciliationUiStatus.MULTIPLE
             reconciliation.verdict == PaperOrderReconciliationVerdict.TERMINAL_RESET_REQUIRED &&
-                reconciliation.resetEligibleAttemptIds.size == 1 ->
+                reconciliation.resetEligibleAttemptIds.isNotEmpty() ->
                 PaperOrderReconciliationUiStatus.EXACT_TERMINAL
             else -> PaperOrderReconciliationUiStatus.AMBIGUOUS
         }
@@ -98,6 +100,23 @@ data class PaperManualSubmitUiState(
         get() = reconciliation?.candidates?.singleOrNull {
             it.unresolvedRemoteOrder || it.terminalResetRequired
         }
+
+    /** Ephemeral UI selection only. It is never restored or treated as GET authorization. */
+    val selectedOrderCandidate: ReconciledPaperOrder?
+        get() = selectedOrderLookupTarget?.let { selected ->
+            reconciliation?.exactUnresolvedCandidates?.singleOrNull {
+                it.manualLookupTarget == selected
+            }
+        }
+
+    val resolvedOrderCount: Int
+        get() = reconciliation?.resolvedCount ?: 0
+
+    val unresolvedOrderCount: Int
+        get() = reconciliation?.unresolvedCount ?: 0
+
+    val ambiguousOrderCount: Int
+        get() = reconciliation?.ambiguousCount ?: 0
 
     val orderStatusSnapshot: PaperOrderStatusSnapshot?
         get() = trackedOrder?.latestLifecycleSnapshot
@@ -114,9 +133,16 @@ data class PaperManualSubmitUiState(
     val untrackableSubmittedOrder: Boolean
         get() = reconciliationUiStatus == PaperOrderReconciliationUiStatus.AMBIGUOUS
 
+    val canRefreshSelectedExactOrder: Boolean
+        get() = reconciliationRestoreComplete &&
+            reconciliation?.verdict in setOf(
+                PaperOrderReconciliationVerdict.SINGLE_UNRESOLVED,
+                PaperOrderReconciliationVerdict.MULTIPLE_UNRESOLVED_PAPER_ORDERS,
+            ) && selectedOrderCandidate != null
+
+    /** Kept as a source-compatible alias; an explicit exact selection is still mandatory. */
     val canRefreshSingleExactOrder: Boolean
-        get() = reconciliationUiStatus == PaperOrderReconciliationUiStatus.EXACT_UNRESOLVED &&
-            trackedOrder?.mappingExact == true && trackedOrder?.orderId != null
+        get() = canRefreshSelectedExactOrder
 
     val resetEligibleAttemptId: String?
         get() = if (reconciliationUiStatus == PaperOrderReconciliationUiStatus.EXACT_TERMINAL) {
@@ -124,6 +150,13 @@ data class PaperManualSubmitUiState(
         } else {
             null
         }
+
+    val canAcknowledgeAllTerminalResets: Boolean
+        get() = reconciliationRestoreComplete &&
+            reconciliation?.verdict == PaperOrderReconciliationVerdict.TERMINAL_RESET_REQUIRED &&
+            reconciliation.unresolvedCount == 0 &&
+            reconciliation.ambiguousCount == 0 &&
+            reconciliation.resetEligibleAttemptIds.isNotEmpty()
 
     companion object {
         fun initial(compileTimeEnabled: Boolean): PaperManualSubmitUiState =
@@ -176,6 +209,7 @@ data class PaperManualSubmitUiState(
                 lastError = null,
                 reconciliation = null,
                 reconciliationRestoreComplete = false,
+                selectedOrderLookupTarget = null,
                 isRefreshingOrderStatus = false,
                 isResettingReconciliation = false,
                 orderStatusError = null,

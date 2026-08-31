@@ -104,6 +104,8 @@ internal data class VelaDashboardActions(
     val manualPaperWarningChanged: (Boolean) -> Unit,
     val manualPaperConfirmationChanged: (String) -> Unit,
     val manualPaperAction: () -> Unit,
+    val manualPaperSelectOrderForStatus: (String) -> Unit,
+    val manualPaperClearOrderStatusSelection: () -> Unit,
     val manualPaperRefreshOrderStatus: () -> Unit,
     val manualPaperNewPreparation: () -> Unit,
     val candleSymbolChanged: (String) -> Unit,
@@ -405,6 +407,9 @@ private fun PaperSection(
                     onWarningAccepted = actions.manualPaperWarningChanged,
                     onConfirmationChange = actions.manualPaperConfirmationChanged,
                     onSubmit = actions.manualPaperAction,
+                    onSelectOrderForStatus = actions.manualPaperSelectOrderForStatus,
+                    onClearOrderStatusSelection =
+                        actions.manualPaperClearOrderStatusSelection,
                     onRefreshOrderStatus = actions.manualPaperRefreshOrderStatus,
                     onNewPreparation = actions.manualPaperNewPreparation,
                 )

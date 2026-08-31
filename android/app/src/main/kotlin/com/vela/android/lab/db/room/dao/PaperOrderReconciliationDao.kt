@@ -71,17 +71,50 @@ interface PaperOrderReconciliationDao {
     suspend fun lifecycleObservationCount(): Int
 
     @Query(
+        "SELECT submitAttemptId FROM paper_order_reconciliation " +
+            "WHERE terminal = 1 " +
+            "AND mappingStatus = 'EXACT' " +
+            "AND localSubmitResult = 'SUBMITTED' " +
+            "AND resetAcknowledgedAtEpochMillis IS NULL " +
+            "ORDER BY submitAttemptId ASC",
+    )
+    suspend fun pendingTerminalResetAttemptIds(): List<String>
+
+    @Query(
         "UPDATE paper_order_reconciliation " +
             "SET resetAcknowledgedAtEpochMillis = :acknowledgedAtEpochMillis " +
-            "WHERE submitAttemptId = :attemptId " +
+            "WHERE submitAttemptId IN (:attemptIds) " +
             "AND terminal = 1 " +
             "AND mappingStatus = 'EXACT' " +
+            "AND localSubmitResult = 'SUBMITTED' " +
             "AND resetAcknowledgedAtEpochMillis IS NULL",
     )
-    suspend fun acknowledgeReset(
-        attemptId: String,
+    suspend fun acknowledgeTerminalResetsUnchecked(
+        attemptIds: List<String>,
         acknowledgedAtEpochMillis: Long,
     ): Int
+
+    /** Acknowledges the complete expected terminal set or rolls the transaction back. */
+    @Transaction
+    suspend fun acknowledgeTerminalResetsAtomically(
+        expectedAttemptIds: List<String>,
+        acknowledgedAtEpochMillis: Long,
+    ) {
+        require(acknowledgedAtEpochMillis >= 0L)
+        val expected = expectedAttemptIds.distinct().sorted()
+        require(expected.isNotEmpty() && expected.size == expectedAttemptIds.size) {
+            "A unique non-empty terminal attempt set is required."
+        }
+        check(pendingTerminalResetAttemptIds() == expected) {
+            "Terminal Paper reset identity changed before acknowledgement."
+        }
+        check(
+            acknowledgeTerminalResetsUnchecked(expected, acknowledgedAtEpochMillis) ==
+                expected.size,
+        ) {
+            "Terminal Paper reset acknowledgement was incomplete."
+        }
+    }
 
     /**
      * Commits immutable lifecycle evidence and its latest-known projection together. A missing or

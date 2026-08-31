@@ -70,6 +70,7 @@ class AlpacaPaperOrderStatusReadOnlyClientTest {
             VALID_TARGET.copy(side = "SELL"),
             VALID_TARGET.copy(quantity = 2.0),
             VALID_TARGET.copy(orderType = "LIMIT"),
+            VALID_TARGET.copy(timeInForce = "GTC"),
         )
         mismatches.forEach { responseIdentity ->
             val http = RecordingStatusHttpClient(success(responseIdentity))
@@ -84,6 +85,21 @@ class AlpacaPaperOrderStatusReadOnlyClientTest {
             assertEquals(1, http.callCount)
         }
     }
+
+    @Test
+    fun absentPersistedClientOrderIdAcceptsAndReturnsTheValidatedResponseIdentity() =
+        runTest(UnconfinedTestDispatcher()) {
+            val target = VALID_TARGET.copy(clientOrderId = null)
+            val http = RecordingStatusHttpClient(success(target, "response-client"))
+
+            val result = AlpacaPaperOrderStatusReadOnlyClient(
+                credentialsProvider,
+                http,
+            ).fetchOrderStatus(target) as AlpacaPaperOrderStatusReadOnlyClient.FetchResult.Ok
+
+            assertEquals("response-client", result.value.clientOrderId)
+            assertEquals(1, http.callCount)
+        }
 
     @Test
     fun errorsExposeNoResponseBodyOrCredentials() = runTest(UnconfinedTestDispatcher()) {
@@ -132,20 +148,23 @@ class AlpacaPaperOrderStatusReadOnlyClientTest {
             }
     }
 
-    private fun success(identity: PaperOrderLifecycleLookupTarget) =
+    private fun success(
+        identity: PaperOrderLifecycleLookupTarget,
+        responseClientOrderId: String = identity.clientOrderId ?: "response-client",
+    ) =
         PaperOrderStatusHttpResult.Success(
             200,
             """
             {
               "id":"${identity.orderId}",
-              "client_order_id":"${identity.clientOrderId}",
+              "client_order_id":"$responseClientOrderId",
               "symbol":"${identity.symbol}",
               "side":"${identity.side.lowercase()}",
               "qty":"${identity.quantity}",
               "type":"${identity.orderType.lowercase()}",
               "time_in_force":"${identity.timeInForce.lowercase()}",
               "status":"filled",
-              "filled_qty":"1",
+              "filled_qty":"${identity.quantity}",
               "filled_avg_price":"773.49",
               "filled_at":"2026-08-07T19:31:02Z"
             }
@@ -157,7 +176,9 @@ class AlpacaPaperOrderStatusReadOnlyClientTest {
         private const val OTHER_ORDER_ID = "7d9b45d4-98fb-4f39-a9f0-22c58bdeca31"
         private val VALID_TARGET = PaperOrderLifecycleLookupTarget(
             submitAttemptId = "attempt-1",
+            attemptStartedAuditEntryId = 1L,
             submitResultAuditEntryId = 2L,
+            submittedAtEpochMillis = 200L,
             orderId = ORDER_ID,
             clientOrderId = "client-1",
             symbol = "SPY",

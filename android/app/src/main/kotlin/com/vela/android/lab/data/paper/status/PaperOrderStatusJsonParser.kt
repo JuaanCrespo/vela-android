@@ -11,9 +11,13 @@ class PaperOrderStatusJsonParser {
     sealed interface ParseResult<out T> {
         data class Ok<T>(val value: T) : ParseResult<T>
         data class Err(val safeMessage: String) : ParseResult<Nothing>
+        data object IdentityMismatch : ParseResult<Nothing>
     }
 
-    fun parse(body: String): ParseResult<PaperOrderStatusSnapshot> {
+    fun parse(
+        body: String,
+        expectedIdentity: PaperOrderLifecycleLookupTarget? = null,
+    ): ParseResult<PaperOrderStatusSnapshot> {
         val json = try {
             if (body.isBlank()) return ParseResult.Err("Paper order status response was empty.")
             JSONObject(body)
@@ -47,6 +51,18 @@ class PaperOrderStatusJsonParser {
             return ParseResult.Err("Paper order status response did not contain a valid type.")
         }
         val timeInForce = json.optString("time_in_force", "").uppercase(Locale.ROOT)
+        if (expectedIdentity != null && (
+                orderId != expectedIdentity.orderId ||
+                    expectedIdentity.clientOrderId?.let { clientOrderId != it } == true ||
+                    symbol != expectedIdentity.symbol ||
+                    side != expectedIdentity.side ||
+                    quantity != expectedIdentity.quantity ||
+                    orderType != expectedIdentity.orderType ||
+                    timeInForce != expectedIdentity.timeInForce
+            )
+        ) {
+            return ParseResult.IdentityMismatch
+        }
         if (timeInForce != "DAY") {
             return ParseResult.Err(
                 "Paper order status response did not contain a valid time-in-force.",

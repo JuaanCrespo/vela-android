@@ -194,6 +194,77 @@ class Ux2UiSafetyContractTest {
     }
 
     @Test
+    fun `manual multi order reconciliation requires an explicit ephemeral selection`() {
+        val dashboard = source("ui/dashboard/OfflineDashboardScreen.kt")
+        val sections = source("ui/dashboard/VelaDashboardSections.kt")
+        val uiState = source("ui/dashboard/PaperManualSubmitUiState.kt")
+        val reconciliationSurface = dashboard
+            .substringAfter("SectionTitle(\"Reconciliación Paper · solo lectura\")")
+            .substringBefore("state.orderStatusError?.let")
+        val readOnlyEvidenceSurface = reconciliationSurface
+            .substringAfter("val readOnlyCandidates =")
+            .substringBefore("state.selectedOrderLookupTarget?.let")
+
+        listOf(
+            "Resolved ${'$'}{state.resolvedOrderCount}",
+            "Unresolved ${'$'}{state.unresolvedOrderCount}",
+            "Ambiguous ${'$'}{state.ambiguousOrderCount}",
+            "Candidates",
+            "reconciliation.exactUnresolvedCandidates",
+            "Orden exacta sin resolver",
+            "Mapping\", \"EXACT",
+            "Attempt audit row",
+            "Result audit row",
+            "Paper order id",
+            "Client order id",
+            "Submitted at",
+            "Local result",
+            "Lifecycle observations",
+            "Seleccionar para consulta GET",
+            "onSelectOrderForStatus(candidate.submitAttemptId)",
+            "Orden seleccionada para consulta GET",
+            "Selected Paper order id",
+            "state.canRefreshSelectedExactOrder",
+            "!state.sessionArmed",
+            "Consultar estado Alpaca · solo GET",
+            "Quitar selección",
+        ).forEach { contract ->
+            assertTrue(
+                reconciliationSurface.contains(contract),
+                "Missing multi-order reconciliation UI contract: ${'$'}contract",
+            )
+        }
+        assertFalse(reconciliationSurface.contains("reconciliation.candidates.forEach"))
+        listOf(
+            "reconciliation.candidates",
+            ".filter { it.manualLookupTarget == null }",
+            ".sortedBy { it.submitAttemptId }",
+            "Evidencia local no seleccionable",
+            "Reset acknowledged at",
+            "Identity reasons:",
+        ).forEach { contract ->
+            assertTrue(
+                readOnlyEvidenceSurface.contains(contract),
+                "Missing read-only lifecycle evidence contract: ${'$'}contract",
+            )
+        }
+        assertFalse(readOnlyEvidenceSurface.contains("onSelectOrderForStatus"))
+        assertFalse(readOnlyEvidenceSurface.contains("onRefreshOrderStatus"))
+        assertEquals(
+            1,
+            dashboard.windowed("onClick = onRefreshOrderStatus".length)
+                .count { it == "onClick = onRefreshOrderStatus" },
+        )
+        assertFalse(dashboard.contains("state.canRefreshSingleExactOrder"))
+        assertTrue(dashboard.contains("selectOrderForStatusLookup(attemptId)"))
+        assertTrue(dashboard.contains("clearOrderStatusSelection()"))
+        assertTrue(sections.contains("manualPaperSelectOrderForStatus"))
+        assertTrue(sections.contains("manualPaperClearOrderStatusSelection"))
+        assertTrue(uiState.contains("val selectedOrderLookupTarget"))
+        assertTrue(uiState.contains("selectedOrderLookupTarget = null"))
+    }
+
+    @Test
     fun `guided preparation and arm callbacks recheck persistent reconciliation`() {
         val dashboard = source("ui/dashboard/OfflineDashboardScreen.kt")
         val manualViewModel = source("ui/dashboard/PaperManualSubmitViewModel.kt")
@@ -212,7 +283,11 @@ class Ux2UiSafetyContractTest {
         assertTrue(synchronizationGate.contains("manual?.blocksNewPaperPreparation == false"))
         assertTrue(manualViewModel.contains("orderStatusTrackerRepository.consolidateFromAudit()"))
         assertTrue(manualViewModel.contains("orderStatusTrackerRepository.persistLifecycle("))
-        assertTrue(manualViewModel.contains("orderStatusTrackerRepository.acknowledgeTerminalReset("))
+        assertTrue(
+            manualViewModel.contains(
+                "orderStatusTrackerRepository.acknowledgeAllTerminalResets(",
+            ),
+        )
     }
 
     @Test

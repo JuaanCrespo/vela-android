@@ -47,6 +47,7 @@ class PaperOrderStatusJsonParserTest {
     fun invalidFilledOrIdentityFailsClosedWithSafeMessage() {
         val invalidBodies = listOf(
             response("filled", "0", "null", null),
+            response("filled", "0.5", "773.49", FILLED_AT),
             response("filled", "1", "773.49", "tomorrow"),
             response("new", "0", "null", null, clientOrderId = ""),
             response("new", "0", "null", null, quantity = "0"),

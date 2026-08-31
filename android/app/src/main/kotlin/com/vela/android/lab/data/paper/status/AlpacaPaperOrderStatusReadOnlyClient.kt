@@ -45,7 +45,9 @@ class AlpacaPaperOrderStatusReadOnlyClient(
             keyId = credentials.keyId,
             secret = credentials.secret,
         )) {
-            is PaperOrderStatusHttpResult.Success -> when (val parsed = parser.parse(response.body)) {
+            is PaperOrderStatusHttpResult.Success -> when (
+                val parsed = parser.parse(response.body, target)
+            ) {
                 is PaperOrderStatusJsonParser.ParseResult.Ok -> {
                     if (parsed.value.matches(target)) {
                         FetchResult.Ok(
@@ -58,6 +60,8 @@ class AlpacaPaperOrderStatusReadOnlyClient(
                 }
                 is PaperOrderStatusJsonParser.ParseResult.Err ->
                     FetchResult.ParseError(parsed.safeMessage)
+                PaperOrderStatusJsonParser.ParseResult.IdentityMismatch ->
+                    FetchResult.ResponseIdentityMismatch
             }
             is PaperOrderStatusHttpResult.HttpError ->
                 FetchResult.HttpError(response.statusCode)
@@ -68,7 +72,7 @@ class AlpacaPaperOrderStatusReadOnlyClient(
     private fun PaperOrderStatusSnapshot.matches(
         target: PaperOrderLifecycleLookupTarget,
     ): Boolean = orderId == target.orderId &&
-        clientOrderId == target.clientOrderId &&
+        (target.clientOrderId == null || clientOrderId == target.clientOrderId) &&
         symbol == target.symbol &&
         side == target.side &&
         quantity == target.quantity &&
