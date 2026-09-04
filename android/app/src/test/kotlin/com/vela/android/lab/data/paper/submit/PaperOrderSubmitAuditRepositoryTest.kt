@@ -30,12 +30,20 @@ class PaperOrderSubmitAuditRepositoryTest {
                 SUBMIT_TEST_NOW,
                 null,
                 null,
+                201,
+                "accepted",
+                "2026-08-07T19:30:00Z",
             ),
         )
         assertEquals(listOf("ATTEMPT_STARTED", "SUBMITTED"), dao.rows.map { it.status })
         assertTrue(repository.hasAttemptForPreview(request.previewId))
         assertTrue(repository.hasClientOrderId(request.clientOrderId))
         assertNull(dao.rows.first().alpacaOrderId)
+        val resultRow = dao.rows.last()
+        assertEquals(201, resultRow.submitHttpStatusCode)
+        assertEquals("accepted", resultRow.initialAlpacaStatus)
+        assertEquals("2026-08-07T19:30:00Z", resultRow.alpacaSubmittedAtIso)
+        assertNull(dao.rows.first().submitHttpStatusCode)
     }
 
     @Test
@@ -60,6 +68,60 @@ class PaperOrderSubmitAuditRepositoryTest {
         )
         assertEquals("FAILED", dao.rows.single().status)
         assertEquals("safe failure", dao.rows.single().safeErrorMessage)
+        assertNull(dao.rows.single().submitHttpStatusCode)
+    }
+
+    @Test
+    fun `persists known HTTP code without inventing absent optional provider metadata`() = runTest {
+        val dao = SubmitFakeAuditDao()
+        val repository = PaperOrderSubmitAuditRepository(dao)
+        val request = submitTestRequest()
+        repository.recordResult(
+            request,
+            submitTestPreview(),
+            true,
+            PaperOrderSubmitResult(
+                submitAttemptId = request.submitAttemptId,
+                previewId = request.previewId,
+                status = PaperOrderSubmitStatus.SUBMITTED,
+                alpacaOrderId = "paper-order-1",
+                clientOrderId = request.clientOrderId,
+                submittedAtEpochMillis = SUBMIT_TEST_NOW,
+                errorCode = null,
+                safeErrorMessage = null,
+                httpStatusCode = 200,
+            ),
+        )
+
+        assertEquals(200, dao.rows.single().submitHttpStatusCode)
+        assertNull(dao.rows.single().initialAlpacaStatus)
+        assertNull(dao.rows.single().alpacaSubmittedAtIso)
+    }
+
+    @Test
+    fun `persists HTTP rejection code as response evidence`() = runTest {
+        val dao = SubmitFakeAuditDao()
+        val repository = PaperOrderSubmitAuditRepository(dao)
+        val request = submitTestRequest()
+        repository.recordResult(
+            request,
+            submitTestPreview(),
+            true,
+            PaperOrderSubmitResult(
+                submitAttemptId = request.submitAttemptId,
+                previewId = request.previewId,
+                status = PaperOrderSubmitStatus.REJECTED,
+                alpacaOrderId = null,
+                clientOrderId = request.clientOrderId,
+                submittedAtEpochMillis = SUBMIT_TEST_NOW,
+                errorCode = PaperOrderSubmitError.HTTP_REJECTED,
+                safeErrorMessage = "safe rejection",
+                httpStatusCode = 422,
+            ),
+        )
+
+        assertEquals("REJECTED", dao.rows.single().status)
+        assertEquals(422, dao.rows.single().submitHttpStatusCode)
     }
 
     @Test

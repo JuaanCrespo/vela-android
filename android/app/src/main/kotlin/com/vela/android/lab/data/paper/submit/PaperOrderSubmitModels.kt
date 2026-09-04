@@ -3,6 +3,7 @@ package com.vela.android.lab.data.paper.submit
 import com.vela.android.lab.data.paper.preflight.OrderSide
 import com.vela.android.lab.data.paper.preflight.OrderType
 import com.vela.android.lab.data.paper.preflight.TimeInForce
+import java.time.Instant
 
 /** Immutable, credential-free request authorized for one Paper attempt. */
 data class PaperOrderSubmitRequest(
@@ -92,6 +93,9 @@ data class PaperOrderSubmitResult(
     val submittedAtEpochMillis: Long,
     val errorCode: PaperOrderSubmitError?,
     val safeErrorMessage: String?,
+    val httpStatusCode: Int? = null,
+    val initialAlpacaStatus: String? = null,
+    val alpacaSubmittedAtIso: String? = null,
 ) {
     init {
         require(submitAttemptId.isNotBlank()) { "Submit attempt id is required." }
@@ -103,6 +107,17 @@ data class PaperOrderSubmitResult(
         require(status == PaperOrderSubmitStatus.SUBMITTED || errorCode != null) {
             "A non-submitted result requires a safe error code."
         }
+        require(httpStatusCode == null || httpStatusCode in 100..599) {
+            "Submit HTTP status must be valid when present."
+        }
+        require(
+            initialAlpacaStatus == null ||
+                initialAlpacaStatus.matches(Regex("^[a-z_]{1,40}$")),
+        ) { "Initial Alpaca status must be normalized when present." }
+        require(
+            alpacaSubmittedAtIso == null ||
+                runCatching { Instant.parse(alpacaSubmittedAtIso) }.isSuccess,
+        ) { "Alpaca submitted_at must be a valid instant when present." }
     }
 }
 

@@ -12,6 +12,12 @@ import androidx.room.PrimaryKey
         Index(value = ["submitAttemptId"], name = "ix_paper_submit_attempt_id"),
         Index(value = ["previewId"], name = "ix_paper_submit_preview_id"),
         Index(value = ["clientOrderId"], name = "ix_paper_submit_client_order_id"),
+        Index(value = ["alpacaOrderId"], name = "ix_paper_submit_alpaca_order_id"),
+        Index(value = ["submittedAtEpochMillis"], name = "ix_paper_submit_time"),
+        Index(
+            value = ["side", "submittedAtEpochMillis"],
+            name = "ix_paper_submit_side_time",
+        ),
         Index(
             value = ["symbol", "submittedAtEpochMillis"],
             name = "ix_paper_submit_symbol_time",
@@ -39,6 +45,12 @@ data class PaperOrderSubmitAuditEntity(
     val priceFreshness: String,
     val marketOpen: Boolean,
     val confirmationTokenId: String,
+    /** Sanitized transport evidence. Null for legacy, local-block, or no-response events. */
+    val submitHttpStatusCode: Int? = null,
+    /** Initial broker lifecycle value from the submit response, when Alpaca supplied one. */
+    val initialAlpacaStatus: String? = null,
+    /** Alpaca `submitted_at` from the submit response, preserved verbatim when valid. */
+    val alpacaSubmittedAtIso: String? = null,
 ) {
     init {
         require(eventKey.isNotBlank()) { "Submit audit event key is required." }
@@ -47,5 +59,16 @@ data class PaperOrderSubmitAuditEntity(
         require(clientOrderId.isNotBlank()) { "Client order id is required." }
         require(quantity.isFinite() && quantity > 0.0) { "Audit quantity must be valid." }
         require(confirmationTokenId.isNotBlank()) { "Confirmation token id is required." }
+        require(submitHttpStatusCode == null || submitHttpStatusCode in 100..599) {
+            "Submit HTTP status must be valid when present."
+        }
+        require(
+            initialAlpacaStatus == null ||
+                initialAlpacaStatus.matches(Regex("^[a-z_]{1,40}$")),
+        ) { "Initial Alpaca status must be a normalized lifecycle value when present." }
+        require(
+            alpacaSubmittedAtIso == null ||
+                runCatching { java.time.Instant.parse(alpacaSubmittedAtIso) }.isSuccess,
+        ) { "Alpaca submitted_at must be a valid instant when present." }
     }
 }

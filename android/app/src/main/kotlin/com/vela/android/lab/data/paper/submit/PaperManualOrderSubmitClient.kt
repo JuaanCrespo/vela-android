@@ -28,17 +28,24 @@ class PaperManualOrderSubmitClient(
         )
         val now = clock().toEpochMilli()
         return when (response) {
-            is PaperSubmitHttpResult.Success -> parseSuccess(request, response.body, now)
-            is PaperSubmitHttpResult.HttpError -> PaperOrderSubmitResult(
-                submitAttemptId = request.submitAttemptId,
-                previewId = request.previewId,
-                status = PaperOrderSubmitStatus.REJECTED,
-                alpacaOrderId = null,
-                clientOrderId = request.clientOrderId,
-                submittedAtEpochMillis = now,
-                errorCode = PaperOrderSubmitError.HTTP_REJECTED,
-                safeErrorMessage = safeProviderMessage(response.body, "Paper order rejected."),
-            )
+            is PaperSubmitHttpResult.Success ->
+                parseSuccess(request, response.statusCode, response.body, now)
+            is PaperSubmitHttpResult.HttpError -> {
+                val metadata = optionalSubmitMetadata(response.body)
+                PaperOrderSubmitResult(
+                    submitAttemptId = request.submitAttemptId,
+                    previewId = request.previewId,
+                    status = PaperOrderSubmitStatus.REJECTED,
+                    alpacaOrderId = null,
+                    clientOrderId = request.clientOrderId,
+                    submittedAtEpochMillis = now,
+                    errorCode = PaperOrderSubmitError.HTTP_REJECTED,
+                    safeErrorMessage = safeProviderMessage(response.body, "Paper order rejected."),
+                    httpStatusCode = response.statusCode,
+                    initialAlpacaStatus = metadata.initialStatus,
+                    alpacaSubmittedAtIso = metadata.submittedAtIso,
+                )
+            }
             PaperSubmitHttpResult.AuthMissing -> failed(
                 request,
                 PaperOrderSubmitStatus.BLOCKED,
@@ -58,10 +65,14 @@ class PaperManualOrderSubmitClient(
 
     private fun parseSuccess(
         request: PaperOrderSubmitRequest,
+        httpStatusCode: Int,
         body: String,
         now: Long,
     ): PaperOrderSubmitResult = try {
-        val id = JSONObject(body).optString("id", "").trim()
+        val json = JSONObject(body)
+        val id = json.optString("id", "").trim()
+        val initialStatus = normalizedInitialStatus(json.optString("status", ""))
+        val submittedAtIso = validInstantOrNull(json.optString("submitted_at", ""))
         if (id.isEmpty()) {
             failed(
                 request,
@@ -69,6 +80,9 @@ class PaperManualOrderSubmitClient(
                 PaperOrderSubmitError.RESPONSE_PARSE_FAILED,
                 "Paper submit response did not include an order id.",
                 now,
+                httpStatusCode,
+                initialStatus,
+                submittedAtIso,
             )
         } else {
             PaperOrderSubmitResult(
@@ -80,6 +94,9 @@ class PaperManualOrderSubmitClient(
                 submittedAtEpochMillis = now,
                 errorCode = null,
                 safeErrorMessage = null,
+                httpStatusCode = httpStatusCode,
+                initialAlpacaStatus = initialStatus,
+                alpacaSubmittedAtIso = submittedAtIso,
             )
         }
     } catch (_: JSONException) {
@@ -89,6 +106,7 @@ class PaperManualOrderSubmitClient(
             PaperOrderSubmitError.RESPONSE_PARSE_FAILED,
             "Paper submit response was invalid JSON.",
             now,
+            httpStatusCode,
         )
     }
 
@@ -98,12 +116,38 @@ class PaperManualOrderSubmitClient(
         fallback
     }
 
+    /** Optional observability never changes the already-established submit result. */
+    private fun optionalSubmitMetadata(body: String): OptionalSubmitMetadata = try {
+        val json = JSONObject(body)
+        OptionalSubmitMetadata(
+            initialStatus = normalizedInitialStatus(json.optString("status", "")),
+            submittedAtIso = validInstantOrNull(json.optString("submitted_at", "")),
+        )
+    } catch (_: JSONException) {
+        OptionalSubmitMetadata(null, null)
+    }
+
+    private fun normalizedInitialStatus(value: String): String? = value.trim().lowercase()
+        .takeIf { it.matches(Regex("^[a-z_]{1,40}$")) }
+
+    private fun validInstantOrNull(value: String): String? = value.trim()
+        .takeIf(String::isNotEmpty)
+        ?.takeIf { runCatching { Instant.parse(it) }.isSuccess }
+
+    private data class OptionalSubmitMetadata(
+        val initialStatus: String?,
+        val submittedAtIso: String?,
+    )
+
     private fun failed(
         request: PaperOrderSubmitRequest,
         status: PaperOrderSubmitStatus,
         error: PaperOrderSubmitError,
         message: String,
         now: Long,
+        httpStatusCode: Int? = null,
+        initialAlpacaStatus: String? = null,
+        alpacaSubmittedAtIso: String? = null,
     ): PaperOrderSubmitResult = PaperOrderSubmitResult(
         submitAttemptId = request.submitAttemptId,
         previewId = request.previewId,
@@ -113,5 +157,8 @@ class PaperManualOrderSubmitClient(
         submittedAtEpochMillis = now,
         errorCode = error,
         safeErrorMessage = PaperSubmitSanitizer.safeMessage(message, "Paper submit failed."),
+        httpStatusCode = httpStatusCode,
+        initialAlpacaStatus = initialAlpacaStatus,
+        alpacaSubmittedAtIso = alpacaSubmittedAtIso,
     )
 }

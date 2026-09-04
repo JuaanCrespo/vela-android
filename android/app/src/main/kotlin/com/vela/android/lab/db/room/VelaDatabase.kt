@@ -10,6 +10,7 @@ import com.vela.android.lab.db.room.dao.FeatureDao
 import com.vela.android.lab.db.room.dao.JournalDao
 import com.vela.android.lab.db.room.dao.MarketBarDao
 import com.vela.android.lab.db.room.dao.PaperOrderDryRunAuditDao
+import com.vela.android.lab.db.room.dao.PaperOrderHistoryDao
 import com.vela.android.lab.db.room.dao.PaperOrderPayloadPreviewDao
 import com.vela.android.lab.db.room.dao.PaperOrderReconciliationDao
 import com.vela.android.lab.db.room.dao.PaperOrderSubmitAuditDao
@@ -25,6 +26,7 @@ import com.vela.android.lab.db.room.entities.SymbolFeaturesEntity
 import com.vela.android.lab.db.room.entities.SymbolSignalEntity
 import com.vela.android.lab.db.room.migrations.MIGRATION_4_5
 import com.vela.android.lab.db.room.migrations.MIGRATION_5_6
+import com.vela.android.lab.db.room.migrations.MIGRATION_6_7
 
 /**
  * Phase 1.c Room database: the offline persistence foundation for
@@ -43,7 +45,7 @@ import com.vela.android.lab.db.room.migrations.MIGRATION_5_6
  * `app/schemas/com.vela.android.lab.db.room.VelaDatabase/1.json`.
  */
 @Database(
-    version = 6,
+    version = 7,
     exportSchema = true,
     entities = [
         MarketBar1mEntity::class,
@@ -65,6 +67,7 @@ abstract class VelaDatabase : RoomDatabase() {
     abstract fun signalDao(): SignalDao
     abstract fun journalDao(): JournalDao
     abstract fun paperOrderDryRunAuditDao(): PaperOrderDryRunAuditDao
+    abstract fun paperOrderHistoryDao(): PaperOrderHistoryDao
     abstract fun paperOrderPayloadPreviewDao(): PaperOrderPayloadPreviewDao
     abstract fun paperOrderSubmitAuditDao(): PaperOrderSubmitAuditDao
     abstract fun paperOrderReconciliationDao(): PaperOrderReconciliationDao
@@ -85,7 +88,7 @@ abstract class VelaDatabase : RoomDatabase() {
                 VelaDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 // Phase 2.q: dev-lab database; throwaway Phase 1.e
                 // bars / features / signals / journal rows are
                 // acceptable losses on schema bump. Watchlist + Paper

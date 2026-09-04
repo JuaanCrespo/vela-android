@@ -22,6 +22,9 @@ class PaperOrderSubmitAuditRepository(
             alpacaOrderId = null,
             timestampEpochMillis = timestampEpochMillis,
             safeErrorMessage = null,
+            submitHttpStatusCode = null,
+            initialAlpacaStatus = null,
+            alpacaSubmittedAtIso = null,
         ),
     )
 
@@ -39,6 +42,9 @@ class PaperOrderSubmitAuditRepository(
             alpacaOrderId = result.alpacaOrderId,
             timestampEpochMillis = result.submittedAtEpochMillis,
             safeErrorMessage = result.safeErrorMessage,
+            submitHttpStatusCode = result.httpStatusCode,
+            initialAlpacaStatus = result.initialAlpacaStatus,
+            alpacaSubmittedAtIso = result.alpacaSubmittedAtIso,
         ),
     )
 
@@ -71,6 +77,9 @@ class PaperOrderSubmitAuditRepository(
         alpacaOrderId: String?,
         timestampEpochMillis: Long,
         safeErrorMessage: String?,
+        submitHttpStatusCode: Int?,
+        initialAlpacaStatus: String?,
+        alpacaSubmittedAtIso: String?,
     ): PaperOrderSubmitAuditEntity = PaperOrderSubmitAuditEntity(
         eventKey = "${request.submitAttemptId}:$status",
         submitAttemptId = request.submitAttemptId,
@@ -91,6 +100,9 @@ class PaperOrderSubmitAuditRepository(
         priceFreshness = preview.priceFreshness.orEmpty(),
         marketOpen = marketOpen,
         confirmationTokenId = request.confirmationTokenId,
+        submitHttpStatusCode = submitHttpStatusCode,
+        initialAlpacaStatus = initialAlpacaStatus,
+        alpacaSubmittedAtIso = alpacaSubmittedAtIso,
     )
 
     companion object {

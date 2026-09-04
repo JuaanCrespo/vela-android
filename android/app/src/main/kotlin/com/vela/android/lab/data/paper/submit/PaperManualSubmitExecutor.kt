@@ -122,6 +122,9 @@ class PaperManualSubmitExecutor(
                         errorCode = PaperOrderSubmitError.TERMINAL_AUDIT_FAILED,
                         safeErrorMessage =
                             "Paper response received but terminal audit failed; verify the Paper dashboard. No retry was attempted.",
+                        httpStatusCode = result.httpStatusCode,
+                        initialAlpacaStatus = result.initialAlpacaStatus,
+                        alpacaSubmittedAtIso = result.alpacaSubmittedAtIso,
                     )
                 }
             }

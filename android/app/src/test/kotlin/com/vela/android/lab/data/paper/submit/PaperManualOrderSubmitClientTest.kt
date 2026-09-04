@@ -28,7 +28,46 @@ class PaperManualOrderSubmitClientTest {
         assertFalse(body.has("secret"))
         assertEquals(PaperOrderSubmitStatus.SUBMITTED, result.status)
         assertEquals("paper-order-1", result.alpacaOrderId)
+        assertEquals(200, result.httpStatusCode)
+        assertNull(result.initialAlpacaStatus)
+        assertNull(result.alpacaSubmittedAtIso)
         assertNull(result.safeErrorMessage)
+    }
+
+    @Test
+    fun `submit response metadata is captured without changing one-shot semantics`() = runTest {
+        val http = SubmitFakeHttpClient(
+            PaperSubmitHttpResult.Success(
+                201,
+                """{"id":"paper-order-1","status":"accepted","submitted_at":"2026-08-07T19:30:00Z"}""",
+            ),
+        )
+
+        val result = client(http).submitOnce(submitTestRequest())
+
+        assertEquals(PaperOrderSubmitStatus.SUBMITTED, result.status)
+        assertEquals(201, result.httpStatusCode)
+        assertEquals("accepted", result.initialAlpacaStatus)
+        assertEquals("2026-08-07T19:30:00Z", result.alpacaSubmittedAtIso)
+        assertEquals(1, http.callCount)
+    }
+
+    @Test
+    fun `missing or malformed optional metadata does not change successful submit result`() = runTest {
+        val http = SubmitFakeHttpClient(
+            PaperSubmitHttpResult.Success(
+                200,
+                """{"id":"paper-order-1","status":"bad status","submitted_at":"not-time"}""",
+            ),
+        )
+
+        val result = client(http).submitOnce(submitTestRequest())
+
+        assertEquals(PaperOrderSubmitStatus.SUBMITTED, result.status)
+        assertEquals(200, result.httpStatusCode)
+        assertNull(result.initialAlpacaStatus)
+        assertNull(result.alpacaSubmittedAtIso)
+        assertEquals(1, http.callCount)
     }
 
     @Test
@@ -42,6 +81,9 @@ class PaperManualOrderSubmitClientTest {
         val result = client(http).submitOnce(submitTestRequest())
         assertEquals(PaperOrderSubmitStatus.REJECTED, result.status)
         assertEquals(PaperOrderSubmitError.HTTP_REJECTED, result.errorCode)
+        assertEquals(422, result.httpStatusCode)
+        assertNull(result.initialAlpacaStatus)
+        assertNull(result.alpacaSubmittedAtIso)
         assertFalse(result.safeErrorMessage!!.contains("do-not-leak"))
         assertEquals(1, http.callCount)
     }
@@ -52,6 +94,7 @@ class PaperManualOrderSubmitClientTest {
         val result = client(http).submitOnce(submitTestRequest())
         assertEquals(PaperOrderSubmitStatus.FAILED, result.status)
         assertEquals(PaperOrderSubmitError.NETWORK_FAILURE, result.errorCode)
+        assertNull(result.httpStatusCode)
         assertEquals(1, http.callCount)
     }
 
@@ -62,6 +105,7 @@ class PaperManualOrderSubmitClientTest {
         assertEquals(PaperOrderSubmitStatus.FAILED, result.status)
         assertEquals(PaperOrderSubmitError.RESPONSE_PARSE_FAILED, result.errorCode)
         assertTrue(result.alpacaOrderId == null)
+        assertEquals(200, result.httpStatusCode)
     }
 
     private fun client(http: AlpacaPaperOrderSubmitHttpClient): PaperManualOrderSubmitClient =
