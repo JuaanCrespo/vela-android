@@ -62,6 +62,7 @@ import com.vela.android.lab.data.paper.preflight.PaperTradingExecutionGuard
 import com.vela.android.lab.data.paper.submit.AlpacaPaperSubmitEndpoint
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitError
 import com.vela.android.lab.ui.candles.CandlesViewModel
+import com.vela.android.lab.ui.history.PaperOrderHistoryViewModel
 import com.vela.android.lab.ui.navigation.VelaDestination
 import com.vela.android.lab.ui.settings.VelaPreferencesViewModel
 import com.vela.android.lab.ui.settings.VelaTimeFormat
@@ -86,6 +87,7 @@ fun OfflineDashboardScreen(
     alpacaStockViewModel: AlpacaStockStreamViewModel? = null,
     watchlistViewModel: WatchlistViewModel? = null,
     historyViewModel: MarketHistoryViewModel? = null,
+    paperOrderHistoryViewModel: PaperOrderHistoryViewModel? = null,
     paperAccountViewModel: PaperAccountViewModel? = null,
     paperPortfolioRiskViewModel: PaperPortfolioRiskViewModel? = null,
     paperOrderPreflightViewModel: PaperOrderPreflightViewModel? = null,
@@ -101,6 +103,8 @@ fun OfflineDashboardScreen(
     val watchlistState = watchlistViewModel?.uiState?.collectAsStateWithLifecycle()?.value
     val tickSnapshot = alpacaStockViewModel?.tickBufferRef?.snapshot?.collectAsStateWithLifecycle()?.value
     val historyState = historyViewModel?.uiState?.collectAsStateWithLifecycle()?.value
+    val paperOrderHistoryState =
+        paperOrderHistoryViewModel?.uiState?.collectAsStateWithLifecycle()?.value
     val paperState = paperAccountViewModel?.uiState?.collectAsStateWithLifecycle()?.value
     val portfolioRiskState = paperPortfolioRiskViewModel?.uiState?.collectAsStateWithLifecycle()?.value
     val preflightState = paperOrderPreflightViewModel?.uiState?.collectAsStateWithLifecycle()?.value
@@ -177,6 +181,7 @@ fun OfflineDashboardScreen(
             watchlist = watchlistState,
             ticks = tickSnapshot,
             history = historyState,
+            paperHistory = paperOrderHistoryState,
             paper = paperState,
             risk = portfolioRiskState,
             preflight = preflightState,
@@ -207,6 +212,11 @@ fun OfflineDashboardScreen(
             watchlistAdd = { watchlistViewModel?.add() },
             watchlistRemove = { watchlistViewModel?.remove(it) },
             historyRefresh = { historyViewModel?.refresh() },
+            paperHistoryStatusFilter = { paperOrderHistoryViewModel?.onStatusFilterSelected(it) },
+            paperHistorySymbolFilter = { paperOrderHistoryViewModel?.onSymbolFilterSelected(it) },
+            paperHistorySideFilter = { paperOrderHistoryViewModel?.onSideFilterSelected(it) },
+            paperHistoryOpenDetails = { paperOrderHistoryViewModel?.openDetails(it) },
+            paperHistoryCloseDetails = { paperOrderHistoryViewModel?.closeDetails() },
             paperRefresh = { paperAccountViewModel?.refresh() },
             riskRefresh = { paperPortfolioRiskViewModel?.refresh() },
             preflightSymbolChanged = { paperOrderPreflightViewModel?.onSymbolInputChange(it) },

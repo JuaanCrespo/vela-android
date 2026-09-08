@@ -19,7 +19,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -39,6 +39,10 @@ import com.vela.android.lab.ui.candles.CandlesUiState
 import com.vela.android.lab.ui.navigation.VelaAppShell
 import com.vela.android.lab.ui.navigation.VelaDestination
 import com.vela.android.lab.ui.navigation.VelaMoreMenu
+import com.vela.android.lab.ui.history.PaperHistorySideFilter
+import com.vela.android.lab.ui.history.PaperHistoryStatusFilter
+import com.vela.android.lab.ui.history.PaperOrderHistoryUiState
+import com.vela.android.lab.ui.history.PaperOrderHistoryViewer
 import com.vela.android.lab.ui.settings.VelaCandleCount
 import com.vela.android.lab.ui.settings.VelaPreferencesState
 import com.vela.android.lab.ui.settings.VelaSettingsScreen
@@ -59,6 +63,7 @@ internal data class VelaDashboardData(
     val watchlist: WatchlistUiState?,
     val ticks: TickBufferSnapshot?,
     val history: MarketHistoryUiState?,
+    val paperHistory: PaperOrderHistoryUiState?,
     val paper: PaperAccountUiState?,
     val risk: PaperPortfolioRiskUiState?,
     val preflight: PaperOrderPreflightUiState?,
@@ -90,6 +95,11 @@ internal data class VelaDashboardActions(
     val watchlistAdd: () -> Unit,
     val watchlistRemove: (String) -> Unit,
     val historyRefresh: () -> Unit,
+    val paperHistoryStatusFilter: (PaperHistoryStatusFilter) -> Unit,
+    val paperHistorySymbolFilter: (String?) -> Unit,
+    val paperHistorySideFilter: (PaperHistorySideFilter) -> Unit,
+    val paperHistoryOpenDetails: (String) -> Unit,
+    val paperHistoryCloseDetails: () -> Unit,
     val paperRefresh: () -> Unit,
     val riskRefresh: () -> Unit,
     val preflightSymbolChanged: (String) -> Unit,
@@ -451,13 +461,13 @@ private fun HistorySection(
     contentPadding: PaddingValues,
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-    val labels = listOf("Mercado", "Dry-runs", "Previews", "Submit audit")
+    val labels = listOf("Paper", "Mercado", "Dry-runs", "Previews", "Submit audit")
     ScreenColumn(contentPadding, data.preferences.preferences.density) {
         VelaSectionHeader(
             title = "Historial y auditoria",
             subtitle = "Lecturas locales append-only; sin borrar ni mutar",
         )
-        TabRow(selectedTabIndex = selectedTab) {
+        ScrollableTabRow(selectedTabIndex = selectedTab) {
             labels.forEachIndexed { index, label ->
                 Tab(
                     selected = selectedTab == index,
@@ -467,9 +477,21 @@ private fun HistorySection(
             }
         }
         when (selectedTab) {
-            0 -> data.history?.let { MarketHistoryCard(it, actions.historyRefresh) }
-            1 -> data.dryRunAudit?.let { PaperDryRunAuditCard(it, actions.dryRunAuditRefresh) }
-            2 -> data.previewQueue?.let { PaperOrderPayloadPreviewQueueCard(it, actions.previewQueueRefresh) }
+            0 -> data.paperHistory?.let { state ->
+                PaperOrderHistoryViewer(
+                    state = state,
+                    onStatusFilterSelected = actions.paperHistoryStatusFilter,
+                    onSymbolFilterSelected = actions.paperHistorySymbolFilter,
+                    onSideFilterSelected = actions.paperHistorySideFilter,
+                    onOrderSelected = actions.paperHistoryOpenDetails,
+                    onCloseDetails = actions.paperHistoryCloseDetails,
+                )
+            }
+            1 -> data.history?.let { MarketHistoryCard(it, actions.historyRefresh) }
+            2 -> data.dryRunAudit?.let { PaperDryRunAuditCard(it, actions.dryRunAuditRefresh) }
+            3 -> data.previewQueue?.let {
+                PaperOrderPayloadPreviewQueueCard(it, actions.previewQueueRefresh)
+            }
             else -> SummaryCard("Submit audit") {
                 if (data.manualPaper?.lastResult == null) {
                     Text(

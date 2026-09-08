@@ -13,14 +13,14 @@ import java.security.MessageDigest
  */
 class PaperOrderHistoryRepository(
     private val dao: PaperOrderHistoryDao,
-) {
+) : PaperOrderHistoryReader {
     suspend fun getAll(): List<CanonicalPaperOrderHistory> {
         val auditAttempts = dao.allAuditAttemptIds()
         val orphans = dao.allReconciliationAttemptIds().filterNot(auditAttempts::contains)
         return recordsFor(auditAttempts + orphans)
     }
 
-    suspend fun getByAttemptId(attemptId: String): CanonicalPaperOrderHistory? =
+    override suspend fun getByAttemptId(attemptId: String): CanonicalPaperOrderHistory? =
         attemptId.trim().takeIf(String::isNotEmpty)?.let { buildRecord(it) }
 
     /** A list is intentional: duplicate broker identities remain visible and fail-closed. */
@@ -47,22 +47,22 @@ class PaperOrderHistoryRepository(
     ): Map<String, List<CanonicalPaperLifecycleObservation>> =
         getByOrderId(orderId).associate { it.submitAttemptId to it.lifecycleObservations }
 
-    suspend fun getTerminalOrders(): List<CanonicalPaperOrderHistory> =
+    override suspend fun getTerminalOrders(): List<CanonicalPaperOrderHistory> =
         recordsFor(dao.terminalCandidateAttemptIds()).filter {
             it.currentLifecycle?.terminal == true
         }
 
-    suspend fun getFilledOrders(): List<CanonicalPaperOrderHistory> =
+    override suspend fun getFilledOrders(): List<CanonicalPaperOrderHistory> =
         recordsFor(dao.filledCandidateAttemptIds()).filter {
             it.currentLifecycle?.status == FILLED
         }
 
-    suspend fun getBySymbol(symbol: String): List<CanonicalPaperOrderHistory> =
+    override suspend fun getBySymbol(symbol: String): List<CanonicalPaperOrderHistory> =
         symbol.trim().uppercase().takeIf(String::isNotEmpty)
             ?.let { recordsFor(dao.attemptIdsBySymbol(it)) }
             .orEmpty()
 
-    suspend fun getBySide(side: String): List<CanonicalPaperOrderHistory> {
+    override suspend fun getBySide(side: String): List<CanonicalPaperOrderHistory> {
         val normalized = side.trim().uppercase()
         if (normalized != BUY && normalized != SELL) return emptyList()
         return recordsFor(dao.attemptIdsBySide(normalized))
@@ -83,7 +83,7 @@ class PaperOrderHistoryRepository(
     }
 
     /** Newest submit ingestion first. Equal or decreasing wall-clock timestamps do not reorder it. */
-    suspend fun getLatestN(limit: Int): List<CanonicalPaperOrderHistory> =
+    override suspend fun getLatestN(limit: Int): List<CanonicalPaperOrderHistory> =
         if (limit <= 0) emptyList() else recordsFor(dao.latestAttemptIds(limit))
 
     private suspend fun recordsFor(attemptIds: List<String>): List<CanonicalPaperOrderHistory> =

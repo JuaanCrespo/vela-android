@@ -20,6 +20,7 @@ import com.vela.android.lab.ui.dashboard.PaperOrderPreflightViewModel
 import com.vela.android.lab.ui.dashboard.PaperManualSubmitViewModel
 import com.vela.android.lab.ui.dashboard.PaperPortfolioRiskViewModel
 import com.vela.android.lab.ui.dashboard.WatchlistViewModel
+import com.vela.android.lab.ui.history.PaperOrderHistoryViewModel
 import com.vela.android.lab.ui.settings.VelaPreferencesViewModel
 import com.vela.android.lab.ui.theme.VelaLabTheme
 
@@ -40,6 +41,10 @@ class MainActivity : ComponentActivity() {
     private val watchlistViewModel: WatchlistViewModel by viewModels { watchlistFactory() }
 
     private val historyViewModel: MarketHistoryViewModel by viewModels { historyFactory() }
+
+    private val paperOrderHistoryViewModel: PaperOrderHistoryViewModel by viewModels {
+        paperOrderHistoryFactory()
+    }
 
     private val paperAccountViewModel: PaperAccountViewModel by viewModels { paperAccountFactory() }
 
@@ -71,6 +76,7 @@ class MainActivity : ComponentActivity() {
                     alpacaStockViewModel = if (BuildConfig.DEBUG) alpacaStockViewModel else null,
                     watchlistViewModel = if (BuildConfig.DEBUG) watchlistViewModel else null,
                     historyViewModel = if (BuildConfig.DEBUG) historyViewModel else null,
+                    paperOrderHistoryViewModel = paperOrderHistoryViewModel,
                     paperAccountViewModel = if (BuildConfig.DEBUG) paperAccountViewModel else null,
                     paperPortfolioRiskViewModel = if (BuildConfig.DEBUG) paperPortfolioRiskViewModel else null,
                     paperOrderPreflightViewModel = if (BuildConfig.DEBUG) paperOrderPreflightViewModel else null,
@@ -151,6 +157,15 @@ class MainActivity : ComponentActivity() {
                     signalRepository = app.signalRepository,
                     journalRepository = app.journalRepository,
                 )
+            }
+        }
+    }
+
+    private fun paperOrderHistoryFactory(): ViewModelProvider.Factory {
+        val app = application as VelaLabApplication
+        return viewModelFactory {
+            initializer {
+                PaperOrderHistoryViewModel(repository = app.paperOrderHistoryRepository)
             }
         }
     }

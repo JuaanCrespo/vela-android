@@ -20,6 +20,7 @@ import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import com.vela.android.lab.data.paper.AlpacaHttpClient
 import com.vela.android.lab.data.paper.AlpacaPaperReadOnlyClient
 import com.vela.android.lab.data.paper.OkHttpAlpacaHttpClient
+import com.vela.android.lab.data.paper.history.PaperOrderHistoryRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderDryRunAuditRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreviewRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPreflightEngine
@@ -286,6 +287,11 @@ class VelaLabApplication : Application() {
 
     val paperOrderSubmitAuditRepository: PaperOrderSubmitAuditRepository by lazy {
         PaperOrderSubmitAuditRepository(database.paperOrderSubmitAuditDao())
+    }
+
+    /** Canonical local-only Paper history. This dependency has no HTTP surface. */
+    val paperOrderHistoryRepository: PaperOrderHistoryRepository by lazy {
+        PaperOrderHistoryRepository(database.paperOrderHistoryDao())
     }
 
     val paperOrderStatusTrackerRepository: PaperOrderStatusTrackerRepository by lazy {
