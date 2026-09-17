@@ -25,6 +25,11 @@ The repository contains the separately frozen Phase 2.v one-shot Paper boundary,
 
 ## Project
 
+Windows workspace layout (2026-09-15): keep this repository at
+`G:\vela-android`. Android SDK, AVDs, Android Studio, Java and Gradle caches
+are located under `C:\Android`. The local SDK configuration and helper
+scripts use the tools on C; moving this repository to C is not required.
+
 The Gradle project lives in [`android/`](android/). From that directory:
 
 ```powershell

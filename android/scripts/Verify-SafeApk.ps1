@@ -16,10 +16,10 @@ $script:ExpectedCompileSdk = '34'
 $script:ExpectedCertificateSha256 =
     'C0106E6DF46127F68C312818124AB628637EFD348E43B175DD4605E97C697ADC'
 $script:ManualCompileFlag = 'MANUAL_PAPER_SUBMIT_COMPILED'
-$script:ApprovedSdkRoot = 'G:\Android\Sdk'
+$script:ApprovedSdkRoot = 'C:\Android\Sdk'
 $script:ApprovedGitPath = 'G:\Programs\Git\Git\cmd\git.exe'
 $script:ApprovedGitRoot = 'G:\Programs\Git\Git'
-$script:ApprovedJavaHome = 'G:\Android\Android Studio 2026.1.2\jbr'
+$script:ApprovedJavaHome = 'C:\Android\Android Studio 2026.1.2\jbr'
 
 function Get-EvidenceValue {
     param(

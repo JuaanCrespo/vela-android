@@ -28,7 +28,7 @@
     ADB serial of the target emulator. Defaults to 'emulator-5554'.
 
 .PARAMETER AdbPath
-    Full path to adb.exe. Defaults to G:\Android\Sdk\platform-tools\adb.exe.
+    Full path to adb.exe. Defaults to C:\Android\Sdk\platform-tools\adb.exe.
 
 .PARAMETER PassMaxSeconds
     Absolute skew (in seconds) at or below which the script returns PASS. Default 2.
@@ -52,7 +52,7 @@
 [CmdletBinding()]
 param(
     [string]$Serial = 'emulator-5554',
-    [string]$AdbPath = 'G:\Android\Sdk\platform-tools\adb.exe',
+    [string]$AdbPath = 'C:\Android\Sdk\platform-tools\adb.exe',
     [int]$PassMaxSeconds = 2,
     [int]$WarnMaxSeconds = 5
 )
