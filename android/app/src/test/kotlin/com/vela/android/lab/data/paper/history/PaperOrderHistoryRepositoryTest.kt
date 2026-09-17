@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 class PaperOrderHistoryRepositoryTest {
     @Test
@@ -251,6 +253,155 @@ class PaperOrderHistoryRepositoryTest {
         assertFalse(repositoryMethods.any { method ->
             forbidden.any { token -> method.contains(token, ignoreCase = true) }
         })
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["FILLED", "CANCELED", "EXPIRED", "REJECTED"])
+    fun `each terminal status rejects regression without repairing evidence`(terminalStatus: String) = runTest {
+        val fixture = fixture()
+        val terminal = fixture.dao.lifecycle.last().copy(
+            status = terminalStatus,
+            rawStatus = terminalStatus.lowercase(),
+        )
+        val regressed = terminal.copy(id = 3L, status = "NEW", rawStatus = "new", terminal = false)
+        fixture.dao.lifecycle[1] = terminal
+        fixture.dao.lifecycle += regressed
+        fixture.dao.reconciliations[ATTEMPT_A] = projectionFor(regressed)
+        val before = fixture.dao.lifecycle.toList()
+
+        val record = fixture.repository.getByAttemptId(ATTEMPT_A)!!
+
+        assertEquals(listOf(PaperHistoryIntegrityDiagnostic.LIFECYCLE_CONTRADICTION), record.integrityDiagnostics)
+        assertEquals(PaperHistoryIntegrityStatus.INCONSISTENT, record.integrityStatus)
+        assertEquals(listOf(1L, 2L, 3L), record.lifecycleObservations.map { it.databaseId })
+        assertEquals(before, fixture.dao.lifecycle)
+        assertEquals("NEW", record.currentLifecycle?.status)
+        assertTrue(record.ambiguous)
+        assertFalse(record.resolved)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["quantity", "price", "filledAt", "terminalStatus"])
+    fun `each changed terminal field is independently inconsistent`(field: String) = runTest {
+        val fixture = fixture()
+        val terminal = fixture.dao.lifecycle.last().copy(id = 3L)
+        val changed = when (field) {
+            "quantity" -> terminal.copy(filledQuantity = 2.0)
+            "price" -> terminal.copy(filledAveragePriceUsd = 771.0)
+            "filledAt" -> terminal.copy(filledAtIso = "2026-08-07T19:32:00Z")
+            else -> terminal.copy(status = "CANCELED", rawStatus = "canceled")
+        }
+        fixture.dao.lifecycle += changed
+        fixture.dao.reconciliations[ATTEMPT_A] = projectionFor(changed)
+
+        val record = fixture.repository.getByAttemptId(ATTEMPT_A)!!
+
+        assertEquals(listOf(PaperHistoryIntegrityDiagnostic.LIFECYCLE_CONTRADICTION), record.integrityDiagnostics)
+        assertEquals(PaperHistoryIntegrityStatus.INCONSISTENT, record.integrityStatus)
+        assertEquals(3, record.lifecycleObservations.size)
+        assertEquals(changed.filledQuantity, record.currentLifecycle?.filledQuantity)
+        assertEquals(changed.filledAveragePriceUsd, record.currentLifecycle?.filledAveragePriceUsd)
+        assertEquals(changed.filledAtIso, record.currentLifecycle?.filledAtIso)
+    }
+
+    @Test
+    fun `decreasing nonterminal filled quantity is independently inconsistent`() = runTest {
+        val fixture = fixture(lifecycleStatus = "NEW")
+        val partial = fixture.dao.lifecycle.last().copy(
+            status = "PARTIALLY_FILLED", rawStatus = "partially_filled", filledQuantity = 0.75,
+        )
+        val decreasing = partial.copy(id = 3L, filledQuantity = 0.25)
+        fixture.dao.lifecycle[1] = partial
+        fixture.dao.lifecycle += decreasing
+        fixture.dao.reconciliations[ATTEMPT_A] = projectionFor(decreasing)
+
+        val record = fixture.repository.getByAttemptId(ATTEMPT_A)!!
+
+        assertEquals(listOf(PaperHistoryIntegrityDiagnostic.LIFECYCLE_CONTRADICTION), record.integrityDiagnostics)
+        assertEquals(PaperHistoryIntegrityStatus.INCONSISTENT, record.integrityStatus)
+        assertEquals(listOf(0.0, 0.75, 0.25), record.lifecycleObservations.map { it.filledQuantity })
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["status", "terminal", "quantity", "price", "filledAt"])
+    fun `each projection field mismatch is detected in isolation without repair`(field: String) = runTest {
+        val fixture = fixture()
+        val projection = fixture.dao.reconciliations.getValue(ATTEMPT_A)
+        val changed = when (field) {
+            "status" -> projection.copy(latestLifecycleStatus = "NEW")
+            "terminal" -> projection.copy(terminal = false)
+            "quantity" -> projection.copy(filledQuantity = 0.5)
+            "price" -> projection.copy(filledAveragePriceUsd = 771.0)
+            else -> projection.copy(filledAtIso = "2026-08-07T19:32:00Z")
+        }
+        fixture.dao.reconciliations[ATTEMPT_A] = changed
+        val before = fixture.dao.lifecycle.toList()
+
+        val record = fixture.repository.getByAttemptId(ATTEMPT_A)!!
+
+        assertEquals(listOf(PaperHistoryIntegrityDiagnostic.PROJECTION_MISMATCH), record.integrityDiagnostics)
+        assertEquals(PaperHistoryIntegrityStatus.INCONSISTENT, record.integrityStatus)
+        assertEquals("FILLED", record.currentLifecycle?.status)
+        assertEquals(1.0, record.currentLifecycle?.filledQuantity)
+        assertEquals(770.27, record.currentLifecycle?.filledAveragePriceUsd)
+        assertEquals(FILLED_AT, record.currentLifecycle?.filledAtIso)
+        assertEquals(changed, fixture.dao.reconciliations[ATTEMPT_A])
+        assertEquals(before, fixture.dao.lifecycle)
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = [1_100L, 100L])
+    fun `lifecycle ingestion ids survive equal timestamps and clock rollback`(latestTimestamp: Long) = runTest {
+        val fixture = fixture()
+        val latest = fixture.dao.lifecycle.last().copy(observedAtEpochMillis = latestTimestamp)
+        fixture.dao.lifecycle[1] = latest
+        fixture.dao.lifecycle.reverse()
+        fixture.dao.audits.reverse()
+        fixture.dao.reconciliations[ATTEMPT_A] = projectionFor(latest)
+
+        val record = fixture.repository.getByAttemptId(ATTEMPT_A)!!
+
+        assertEquals(listOf(1L, 2L), record.lifecycleObservations.map { it.databaseId })
+        assertEquals(1L, record.auditStartRowId)
+        assertEquals(2L, record.auditResultRowId)
+        assertEquals(latestTimestamp, record.currentLifecycle?.observedAtEpochMillis)
+        assertEquals("FILLED", record.currentLifecycle?.status)
+        assertEquals(PaperHistoryIntegrityStatus.VALID, record.integrityStatus)
+    }
+
+    @Test
+    fun `new repository reconstructs from copied durable records without writes or session memory`() = runTest {
+        val original = fixture(includeSecond = true)
+        val expected = original.repository.getAll()
+        val restored = FakeHistoryDao().apply {
+            audits += original.dao.audits.map { it.copy() }
+            lifecycle += original.dao.lifecycle.map { it.copy() }
+            dryRuns += original.dao.dryRuns.map { it.copy() }
+            reconciliations.putAll(original.dao.reconciliations.mapValues { it.value.copy() })
+        }
+        original.dao.audits.clear()
+        original.dao.lifecycle.clear()
+        original.dao.dryRuns.clear()
+        original.dao.reconciliations.clear()
+        val before = listOf(restored.audits.toList(), restored.lifecycle.toList(), restored.dryRuns.toList())
+        val projectionsBefore = restored.reconciliations.toMap()
+        val recreated = PaperOrderHistoryRepository(restored)
+
+        assertEquals(expected, recreated.getAll())
+        assertEquals(expected.first(), recreated.getByAttemptId(ATTEMPT_A))
+        recreated.getByOrderId(ORDER_A)
+        recreated.getByClientOrderId(CLIENT_A)
+        recreated.getByAuditRowId(2L)
+        recreated.getLifecycleByAttemptId(ATTEMPT_A)
+        recreated.getLifecycleByOrderId(ORDER_A)
+        recreated.getTerminalOrders()
+        recreated.getFilledOrders()
+        recreated.getBySymbol("SPY")
+        recreated.getBySide("BUY")
+        recreated.getWithinTimeRange(0L, 10_000L)
+        recreated.getLatestN(2)
+        assertEquals(before, listOf(restored.audits.toList(), restored.lifecycle.toList(), restored.dryRuns.toList()))
+        assertEquals(projectionsBefore, restored.reconciliations)
     }
 
     private fun fixture(

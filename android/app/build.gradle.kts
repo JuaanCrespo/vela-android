@@ -150,6 +150,9 @@ dependencies {
 
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Host-only execution of the exact Room history SQL against the exported v7 schema.
+    // Matches the SQLite driver already used by the Room compiler; never packaged in the app.
+    testImplementation("org.xerial:sqlite-jdbc:3.41.2.2")
     testRuntimeOnly(libs.junit.platform.launcher)
 
     androidTestImplementation(libs.room.testing)

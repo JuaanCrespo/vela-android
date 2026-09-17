@@ -228,12 +228,17 @@ class PaperOrderHistoryViewModelTest {
 
     @Test
     fun `legacy null metadata remains visible and is not classified as load error`() = runTest {
-        val legacy = record("legacy", legacy = true)
+        val legacy = record("legacy", legacy = true, integrity = PaperHistoryIntegrityStatus.VALID_WITH_WARNINGS)
         val vm = PaperOrderHistoryViewModel(FakePaperHistoryReader(latest = listOf(legacy)))
 
         assertEquals(listOf(legacy), vm.uiState.value.orders)
         assertNull(vm.uiState.value.error)
         assertNull(vm.uiState.value.orders.single().submitHttpStatusCode)
+        assertEquals(PaperHistoryIntegrityStatus.VALID_WITH_WARNINGS, vm.uiState.value.orders.single().integrityStatus)
+        assertEquals(
+            listOf(PaperHistoryIntegrityDiagnostic.LEGACY_SUBMIT_METADATA_UNKNOWN),
+            vm.uiState.value.orders.single().integrityDiagnostics,
+        )
     }
 
     @Test
