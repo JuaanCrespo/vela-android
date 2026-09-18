@@ -1,0 +1,2313 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 8,
+    "identityHash": "6ef7a00554221e6e351c70bbbcc42560",
+    "entities": [
+      {
+        "tableName": "market_bars_1m",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `symbol` TEXT NOT NULL, `bucketStartEpochMillis` INTEGER NOT NULL, `open` REAL NOT NULL, `high` REAL NOT NULL, `low` REAL NOT NULL, `close` REAL NOT NULL, `updateCount` INTEGER NOT NULL, `syntheticVolume` REAL NOT NULL, `lastUpdateTimeEpochMillis` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketStartEpochMillis",
+            "columnName": "bucketStartEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "open",
+            "columnName": "open",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "high",
+            "columnName": "high",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "low",
+            "columnName": "low",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "close",
+            "columnName": "close",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updateCount",
+            "columnName": "updateCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syntheticVolume",
+            "columnName": "syntheticVolume",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastUpdateTimeEpochMillis",
+            "columnName": "lastUpdateTimeEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "uq_market_bars_1m_symbol_bucket",
+            "unique": true,
+            "columnNames": [
+              "symbol",
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `uq_market_bars_1m_symbol_bucket` ON `${TABLE_NAME}` (`symbol`, `bucketStartEpochMillis`)"
+          },
+          {
+            "name": "ix_market_bars_1m_bucket",
+            "unique": false,
+            "columnNames": [
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_market_bars_1m_bucket` ON `${TABLE_NAME}` (`bucketStartEpochMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "symbol_features",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `symbol` TEXT NOT NULL, `bucketStartEpochMillis` INTEGER NOT NULL, `shortReturn` REAL NOT NULL, `percentChange` REAL NOT NULL, `barRange` REAL NOT NULL, `direction` TEXT NOT NULL, `recentBarCount` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketStartEpochMillis",
+            "columnName": "bucketStartEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shortReturn",
+            "columnName": "shortReturn",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "percentChange",
+            "columnName": "percentChange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "barRange",
+            "columnName": "barRange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recentBarCount",
+            "columnName": "recentBarCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "uq_symbol_features_symbol_bucket",
+            "unique": true,
+            "columnNames": [
+              "symbol",
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `uq_symbol_features_symbol_bucket` ON `${TABLE_NAME}` (`symbol`, `bucketStartEpochMillis`)"
+          },
+          {
+            "name": "ix_symbol_features_bucket",
+            "unique": false,
+            "columnNames": [
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_symbol_features_bucket` ON `${TABLE_NAME}` (`bucketStartEpochMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "symbol_signals",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `symbol` TEXT NOT NULL, `bucketStartEpochMillis` INTEGER NOT NULL, `state` TEXT NOT NULL, `score` INTEGER NOT NULL, `shortReturn` REAL NOT NULL, `percentChange` REAL NOT NULL, `barRange` REAL NOT NULL, `direction` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketStartEpochMillis",
+            "columnName": "bucketStartEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "score",
+            "columnName": "score",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shortReturn",
+            "columnName": "shortReturn",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "percentChange",
+            "columnName": "percentChange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "barRange",
+            "columnName": "barRange",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "uq_symbol_signals_symbol_bucket",
+            "unique": true,
+            "columnNames": [
+              "symbol",
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `uq_symbol_signals_symbol_bucket` ON `${TABLE_NAME}` (`symbol`, `bucketStartEpochMillis`)"
+          },
+          {
+            "name": "ix_symbol_signals_bucket",
+            "unique": false,
+            "columnNames": [
+              "bucketStartEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_symbol_signals_bucket` ON `${TABLE_NAME}` (`bucketStartEpochMillis`)"
+          },
+          {
+            "name": "ix_symbol_signals_state",
+            "unique": false,
+            "columnNames": [
+              "state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_symbol_signals_state` ON `${TABLE_NAME}` (`state`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "journal_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `symbol` TEXT, `eventType` TEXT NOT NULL, `timestampEpochMillis` INTEGER NOT NULL, `payloadJson` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestampEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payloadJson",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ix_journal_events_timestamp",
+            "unique": false,
+            "columnNames": [
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_journal_events_timestamp` ON `${TABLE_NAME}` (`timestampEpochMillis`)"
+          },
+          {
+            "name": "ix_journal_events_symbol_timestamp",
+            "unique": false,
+            "columnNames": [
+              "symbol",
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_journal_events_symbol_timestamp` ON `${TABLE_NAME}` (`symbol`, `timestampEpochMillis`)"
+          },
+          {
+            "name": "ix_journal_events_event_type",
+            "unique": false,
+            "columnNames": [
+              "eventType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_journal_events_event_type` ON `${TABLE_NAME}` (`eventType`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "paper_order_dry_run_audits",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `clientDryRunId` TEXT NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `symbol` TEXT NOT NULL, `side` TEXT NOT NULL, `orderType` TEXT NOT NULL, `timeInForce` TEXT NOT NULL, `quantity` REAL NOT NULL, `limitPriceUsd` REAL, `status` TEXT NOT NULL, `estimatedNotionalUsd` REAL, `buyingPowerAfterUsd` REAL, `allocationPercentAfter` REAL, `latestPriceUsedUsd` REAL, `priceSource` TEXT, `priceFreshness` TEXT, `priceAgeMillis` INTEGER, `latestSignalState` TEXT, `marketOpen` INTEGER, `blockReasonsSummary` TEXT NOT NULL, `warningsSummary` TEXT NOT NULL, `source` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientDryRunId",
+            "columnName": "clientDryRunId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderType",
+            "columnName": "orderType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeInForce",
+            "columnName": "timeInForce",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "limitPriceUsd",
+            "columnName": "limitPriceUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "estimatedNotionalUsd",
+            "columnName": "estimatedNotionalUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "buyingPowerAfterUsd",
+            "columnName": "buyingPowerAfterUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "allocationPercentAfter",
+            "columnName": "allocationPercentAfter",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestPriceUsedUsd",
+            "columnName": "latestPriceUsedUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "priceSource",
+            "columnName": "priceSource",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "priceFreshness",
+            "columnName": "priceFreshness",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "priceAgeMillis",
+            "columnName": "priceAgeMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestSignalState",
+            "columnName": "latestSignalState",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "marketOpen",
+            "columnName": "marketOpen",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "blockReasonsSummary",
+            "columnName": "blockReasonsSummary",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "warningsSummary",
+            "columnName": "warningsSummary",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ix_paper_dry_run_created_at",
+            "unique": false,
+            "columnNames": [
+              "createdAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_dry_run_created_at` ON `${TABLE_NAME}` (`createdAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_dry_run_symbol_created_at",
+            "unique": false,
+            "columnNames": [
+              "symbol",
+              "createdAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_dry_run_symbol_created_at` ON `${TABLE_NAME}` (`symbol`, `createdAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_dry_run_client_id",
+            "unique": true,
+            "columnNames": [
+              "clientDryRunId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ix_paper_dry_run_client_id` ON `${TABLE_NAME}` (`clientDryRunId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "paper_order_payload_previews",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `previewId` TEXT NOT NULL, `linkedClientDryRunId` TEXT NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `symbol` TEXT NOT NULL, `side` TEXT NOT NULL, `orderType` TEXT NOT NULL, `timeInForce` TEXT NOT NULL, `quantity` REAL NOT NULL, `limitPriceUsd` REAL, `status` TEXT NOT NULL, `estimatedNotionalUsd` REAL, `priceSource` TEXT, `priceFreshness` TEXT, `executionEnabled` INTEGER NOT NULL, `endpointPreview` TEXT NOT NULL, `httpMethodPreview` TEXT NOT NULL, `warningsSummary` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previewId",
+            "columnName": "previewId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "linkedClientDryRunId",
+            "columnName": "linkedClientDryRunId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderType",
+            "columnName": "orderType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeInForce",
+            "columnName": "timeInForce",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "limitPriceUsd",
+            "columnName": "limitPriceUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "estimatedNotionalUsd",
+            "columnName": "estimatedNotionalUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "priceSource",
+            "columnName": "priceSource",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "priceFreshness",
+            "columnName": "priceFreshness",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "executionEnabled",
+            "columnName": "executionEnabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endpointPreview",
+            "columnName": "endpointPreview",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "httpMethodPreview",
+            "columnName": "httpMethodPreview",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "warningsSummary",
+            "columnName": "warningsSummary",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ix_paper_payload_preview_created_at",
+            "unique": false,
+            "columnNames": [
+              "createdAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_payload_preview_created_at` ON `${TABLE_NAME}` (`createdAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_payload_preview_symbol_created_at",
+            "unique": false,
+            "columnNames": [
+              "symbol",
+              "createdAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_payload_preview_symbol_created_at` ON `${TABLE_NAME}` (`symbol`, `createdAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_payload_preview_id",
+            "unique": true,
+            "columnNames": [
+              "previewId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ix_paper_payload_preview_id` ON `${TABLE_NAME}` (`previewId`)"
+          },
+          {
+            "name": "ix_paper_payload_preview_dry_run_id",
+            "unique": false,
+            "columnNames": [
+              "linkedClientDryRunId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_payload_preview_dry_run_id` ON `${TABLE_NAME}` (`linkedClientDryRunId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "paper_order_submit_audit",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `eventKey` TEXT NOT NULL, `submitAttemptId` TEXT NOT NULL, `previewId` TEXT NOT NULL, `linkedClientDryRunId` TEXT NOT NULL, `clientOrderId` TEXT NOT NULL, `symbol` TEXT NOT NULL, `side` TEXT NOT NULL, `quantity` REAL NOT NULL, `orderType` TEXT NOT NULL, `timeInForce` TEXT NOT NULL, `limitPriceUsd` REAL, `status` TEXT NOT NULL, `alpacaOrderId` TEXT, `submittedAtEpochMillis` INTEGER NOT NULL, `safeErrorMessage` TEXT, `priceSource` TEXT NOT NULL, `priceFreshness` TEXT NOT NULL, `marketOpen` INTEGER NOT NULL, `confirmationTokenId` TEXT NOT NULL, `submitHttpStatusCode` INTEGER, `initialAlpacaStatus` TEXT, `alpacaSubmittedAtIso` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventKey",
+            "columnName": "eventKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "submitAttemptId",
+            "columnName": "submitAttemptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previewId",
+            "columnName": "previewId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "linkedClientDryRunId",
+            "columnName": "linkedClientDryRunId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientOrderId",
+            "columnName": "clientOrderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderType",
+            "columnName": "orderType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeInForce",
+            "columnName": "timeInForce",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "limitPriceUsd",
+            "columnName": "limitPriceUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "alpacaOrderId",
+            "columnName": "alpacaOrderId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "submittedAtEpochMillis",
+            "columnName": "submittedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "safeErrorMessage",
+            "columnName": "safeErrorMessage",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "priceSource",
+            "columnName": "priceSource",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priceFreshness",
+            "columnName": "priceFreshness",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "marketOpen",
+            "columnName": "marketOpen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confirmationTokenId",
+            "columnName": "confirmationTokenId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "submitHttpStatusCode",
+            "columnName": "submitHttpStatusCode",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "initialAlpacaStatus",
+            "columnName": "initialAlpacaStatus",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "alpacaSubmittedAtIso",
+            "columnName": "alpacaSubmittedAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ix_paper_submit_event_key",
+            "unique": true,
+            "columnNames": [
+              "eventKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ix_paper_submit_event_key` ON `${TABLE_NAME}` (`eventKey`)"
+          },
+          {
+            "name": "ix_paper_submit_attempt_id",
+            "unique": false,
+            "columnNames": [
+              "submitAttemptId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_submit_attempt_id` ON `${TABLE_NAME}` (`submitAttemptId`)"
+          },
+          {
+            "name": "ix_paper_submit_preview_id",
+            "unique": false,
+            "columnNames": [
+              "previewId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_submit_preview_id` ON `${TABLE_NAME}` (`previewId`)"
+          },
+          {
+            "name": "ix_paper_submit_client_order_id",
+            "unique": false,
+            "columnNames": [
+              "clientOrderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_submit_client_order_id` ON `${TABLE_NAME}` (`clientOrderId`)"
+          },
+          {
+            "name": "ix_paper_submit_alpaca_order_id",
+            "unique": false,
+            "columnNames": [
+              "alpacaOrderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_submit_alpaca_order_id` ON `${TABLE_NAME}` (`alpacaOrderId`)"
+          },
+          {
+            "name": "ix_paper_submit_time",
+            "unique": false,
+            "columnNames": [
+              "submittedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_submit_time` ON `${TABLE_NAME}` (`submittedAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_submit_side_time",
+            "unique": false,
+            "columnNames": [
+              "side",
+              "submittedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_submit_side_time` ON `${TABLE_NAME}` (`side`, `submittedAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_submit_symbol_time",
+            "unique": false,
+            "columnNames": [
+              "symbol",
+              "submittedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_submit_symbol_time` ON `${TABLE_NAME}` (`symbol`, `submittedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "paper_order_reconciliation",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`submitAttemptId` TEXT NOT NULL, `attemptStartedAuditEntryId` INTEGER, `submitResultAuditEntryId` INTEGER, `previewId` TEXT, `linkedClientDryRunId` TEXT, `alpacaOrderId` TEXT, `clientOrderId` TEXT, `symbol` TEXT, `side` TEXT, `quantity` REAL, `orderType` TEXT, `timeInForce` TEXT, `limitPriceUsd` REAL, `submittedAtEpochMillis` INTEGER, `localSubmitResult` TEXT, `mappingStatus` TEXT NOT NULL, `mappingDiagnostic` TEXT, `latestLifecycleStatus` TEXT, `latestLifecycleRawStatus` TEXT, `latestLifecycleObservedAtEpochMillis` INTEGER, `terminal` INTEGER NOT NULL, `filledQuantity` REAL, `filledAveragePriceUsd` REAL, `filledAtIso` TEXT, `lifecycleSource` TEXT, `lifecycleHttpStatusCode` INTEGER, `resetAcknowledgedAtEpochMillis` INTEGER, PRIMARY KEY(`submitAttemptId`))",
+        "fields": [
+          {
+            "fieldPath": "submitAttemptId",
+            "columnName": "submitAttemptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptStartedAuditEntryId",
+            "columnName": "attemptStartedAuditEntryId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "submitResultAuditEntryId",
+            "columnName": "submitResultAuditEntryId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "previewId",
+            "columnName": "previewId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "linkedClientDryRunId",
+            "columnName": "linkedClientDryRunId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "alpacaOrderId",
+            "columnName": "alpacaOrderId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "clientOrderId",
+            "columnName": "clientOrderId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "orderType",
+            "columnName": "orderType",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timeInForce",
+            "columnName": "timeInForce",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "limitPriceUsd",
+            "columnName": "limitPriceUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "submittedAtEpochMillis",
+            "columnName": "submittedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "localSubmitResult",
+            "columnName": "localSubmitResult",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "mappingStatus",
+            "columnName": "mappingStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mappingDiagnostic",
+            "columnName": "mappingDiagnostic",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestLifecycleStatus",
+            "columnName": "latestLifecycleStatus",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestLifecycleRawStatus",
+            "columnName": "latestLifecycleRawStatus",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestLifecycleObservedAtEpochMillis",
+            "columnName": "latestLifecycleObservedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "terminal",
+            "columnName": "terminal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filledQuantity",
+            "columnName": "filledQuantity",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "filledAveragePriceUsd",
+            "columnName": "filledAveragePriceUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "filledAtIso",
+            "columnName": "filledAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lifecycleSource",
+            "columnName": "lifecycleSource",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lifecycleHttpStatusCode",
+            "columnName": "lifecycleHttpStatusCode",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "resetAcknowledgedAtEpochMillis",
+            "columnName": "resetAcknowledgedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "submitAttemptId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ix_paper_reconciliation_order_id",
+            "unique": false,
+            "columnNames": [
+              "alpacaOrderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_reconciliation_order_id` ON `${TABLE_NAME}` (`alpacaOrderId`)"
+          },
+          {
+            "name": "ix_paper_reconciliation_client_order_id",
+            "unique": false,
+            "columnNames": [
+              "clientOrderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_reconciliation_client_order_id` ON `${TABLE_NAME}` (`clientOrderId`)"
+          },
+          {
+            "name": "ix_paper_reconciliation_mapping_status",
+            "unique": false,
+            "columnNames": [
+              "mappingStatus"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_reconciliation_mapping_status` ON `${TABLE_NAME}` (`mappingStatus`)"
+          },
+          {
+            "name": "ix_paper_reconciliation_terminal_reset",
+            "unique": false,
+            "columnNames": [
+              "terminal",
+              "resetAcknowledgedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_reconciliation_terminal_reset` ON `${TABLE_NAME}` (`terminal`, `resetAcknowledgedAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_reconciliation_submitted_at",
+            "unique": false,
+            "columnNames": [
+              "submittedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_reconciliation_submitted_at` ON `${TABLE_NAME}` (`submittedAtEpochMillis`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "paper_order_lifecycle_observation",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `observationKey` TEXT NOT NULL, `submitAttemptId` TEXT NOT NULL, `alpacaOrderId` TEXT NOT NULL, `status` TEXT NOT NULL, `rawStatus` TEXT NOT NULL, `observedAtEpochMillis` INTEGER NOT NULL, `terminal` INTEGER NOT NULL, `filledQuantity` REAL, `filledAveragePriceUsd` REAL, `filledAtIso` TEXT, `source` TEXT NOT NULL, `httpStatusCode` INTEGER, `submitAuditEntryId` INTEGER, FOREIGN KEY(`submitAttemptId`) REFERENCES `paper_order_reconciliation`(`submitAttemptId`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observationKey",
+            "columnName": "observationKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "submitAttemptId",
+            "columnName": "submitAttemptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "alpacaOrderId",
+            "columnName": "alpacaOrderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawStatus",
+            "columnName": "rawStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observedAtEpochMillis",
+            "columnName": "observedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "terminal",
+            "columnName": "terminal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filledQuantity",
+            "columnName": "filledQuantity",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "filledAveragePriceUsd",
+            "columnName": "filledAveragePriceUsd",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "filledAtIso",
+            "columnName": "filledAtIso",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "httpStatusCode",
+            "columnName": "httpStatusCode",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "submitAuditEntryId",
+            "columnName": "submitAuditEntryId",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ix_paper_lifecycle_observation_key",
+            "unique": true,
+            "columnNames": [
+              "observationKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ix_paper_lifecycle_observation_key` ON `${TABLE_NAME}` (`observationKey`)"
+          },
+          {
+            "name": "ix_paper_lifecycle_attempt_id",
+            "unique": false,
+            "columnNames": [
+              "submitAttemptId",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_lifecycle_attempt_id` ON `${TABLE_NAME}` (`submitAttemptId`, `id`)"
+          },
+          {
+            "name": "ix_paper_lifecycle_order_id",
+            "unique": false,
+            "columnNames": [
+              "alpacaOrderId",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_lifecycle_order_id` ON `${TABLE_NAME}` (`alpacaOrderId`, `id`)"
+          },
+          {
+            "name": "ix_paper_lifecycle_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_lifecycle_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "ix_paper_lifecycle_observed_at",
+            "unique": false,
+            "columnNames": [
+              "observedAtEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_lifecycle_observed_at` ON `${TABLE_NAME}` (`observedAtEpochMillis`)"
+          },
+          {
+            "name": "ix_paper_lifecycle_submit_audit_id",
+            "unique": false,
+            "columnNames": [
+              "submitAuditEntryId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `ix_paper_lifecycle_submit_audit_id` ON `${TABLE_NAME}` (`submitAuditEntryId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "paper_order_reconciliation",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "submitAttemptId"
+            ],
+            "referencedColumns": [
+              "submitAttemptId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "paper_broker_snapshot",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`snapshotId` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `manualRefreshId` TEXT NOT NULL, `accountRef` TEXT, `source` TEXT NOT NULL, `parserVersion` TEXT NOT NULL, `configRef` TEXT NOT NULL, `sessionRef` TEXT NOT NULL, `startedAtEpochMillis` INTEGER NOT NULL, `accountCompletedAtEpochMillis` INTEGER, `positionsCompletedAtEpochMillis` INTEGER, `completedAtEpochMillis` INTEGER NOT NULL, `startedMonotonicNanos` INTEGER NOT NULL, `completedMonotonicNanos` INTEGER NOT NULL, `accountRequestOutcome` TEXT NOT NULL, `positionsRequestOutcome` TEXT NOT NULL, `accountHttpStatus` INTEGER, `positionsHttpStatus` INTEGER, `positionsReceivedCount` INTEGER NOT NULL, `positionsValidatedCount` INTEGER NOT NULL, `completeness` TEXT NOT NULL, `diagnosticsJson` TEXT NOT NULL, `persistedAtEpochMillis` INTEGER NOT NULL, `observedAccountJson` TEXT, `localHistoryDigest` TEXT NOT NULL, `localHistoryStable` INTEGER NOT NULL, `orderSequenceInclusive` INTEGER NOT NULL, `lifecycleSequenceInclusive` INTEGER NOT NULL, PRIMARY KEY(`snapshotId`))",
+        "fields": [
+          {
+            "fieldPath": "snapshotId",
+            "columnName": "snapshotId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sequence",
+            "columnName": "sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manualRefreshId",
+            "columnName": "manualRefreshId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountRef",
+            "columnName": "accountRef",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parserVersion",
+            "columnName": "parserVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "configRef",
+            "columnName": "configRef",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionRef",
+            "columnName": "sessionRef",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtEpochMillis",
+            "columnName": "startedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountCompletedAtEpochMillis",
+            "columnName": "accountCompletedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "positionsCompletedAtEpochMillis",
+            "columnName": "positionsCompletedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "completedAtEpochMillis",
+            "columnName": "completedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedMonotonicNanos",
+            "columnName": "startedMonotonicNanos",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedMonotonicNanos",
+            "columnName": "completedMonotonicNanos",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountRequestOutcome",
+            "columnName": "accountRequestOutcome",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "positionsRequestOutcome",
+            "columnName": "positionsRequestOutcome",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountHttpStatus",
+            "columnName": "accountHttpStatus",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "positionsHttpStatus",
+            "columnName": "positionsHttpStatus",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "positionsReceivedCount",
+            "columnName": "positionsReceivedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "positionsValidatedCount",
+            "columnName": "positionsValidatedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completeness",
+            "columnName": "completeness",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diagnosticsJson",
+            "columnName": "diagnosticsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "persistedAtEpochMillis",
+            "columnName": "persistedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observedAccountJson",
+            "columnName": "observedAccountJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "localHistoryDigest",
+            "columnName": "localHistoryDigest",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localHistoryStable",
+            "columnName": "localHistoryStable",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderSequenceInclusive",
+            "columnName": "orderSequenceInclusive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lifecycleSequenceInclusive",
+            "columnName": "lifecycleSequenceInclusive",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "snapshotId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_paper_broker_snapshot_manualRefreshId",
+            "unique": true,
+            "columnNames": [
+              "manualRefreshId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_paper_broker_snapshot_manualRefreshId` ON `${TABLE_NAME}` (`manualRefreshId`)"
+          },
+          {
+            "name": "index_paper_broker_snapshot_sequence",
+            "unique": true,
+            "columnNames": [
+              "sequence"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_paper_broker_snapshot_sequence` ON `${TABLE_NAME}` (`sequence`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "paper_broker_position_snapshot",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`snapshotId` TEXT NOT NULL, `symbol` TEXT NOT NULL, `rowIndex` INTEGER NOT NULL, `side` TEXT NOT NULL, `qtyRawDecimal` TEXT NOT NULL, `qtyCanonicalDecimal` TEXT NOT NULL, `decimalProvenance` TEXT NOT NULL, PRIMARY KEY(`snapshotId`, `symbol`), FOREIGN KEY(`snapshotId`) REFERENCES `paper_broker_snapshot`(`snapshotId`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "snapshotId",
+            "columnName": "snapshotId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rowIndex",
+            "columnName": "rowIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qtyRawDecimal",
+            "columnName": "qtyRawDecimal",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qtyCanonicalDecimal",
+            "columnName": "qtyCanonicalDecimal",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decimalProvenance",
+            "columnName": "decimalProvenance",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "snapshotId",
+            "symbol"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_paper_broker_position_snapshot_snapshotId_rowIndex",
+            "unique": true,
+            "columnNames": [
+              "snapshotId",
+              "rowIndex"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_paper_broker_position_snapshot_snapshotId_rowIndex` ON `${TABLE_NAME}` (`snapshotId`, `rowIndex`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "paper_broker_snapshot",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "snapshotId"
+            ],
+            "referencedColumns": [
+              "snapshotId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "paper_position_anchor",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`anchorId` TEXT NOT NULL, `symbol` TEXT NOT NULL, `accountRef` TEXT NOT NULL, `brokerSnapshotId` TEXT NOT NULL, `baselineQty` TEXT NOT NULL, `baselineProvenance` TEXT NOT NULL, `orderSequenceInclusive` INTEGER NOT NULL, `lifecycleSequenceInclusive` INTEGER NOT NULL, `cutAssurance` TEXT NOT NULL, `status` TEXT NOT NULL, `activeKey` TEXT, `createdAtEpochMillis` INTEGER NOT NULL, `invalidatedAtEpochMillis` INTEGER, `invalidationReason` TEXT, `version` INTEGER NOT NULL, PRIMARY KEY(`anchorId`), FOREIGN KEY(`brokerSnapshotId`) REFERENCES `paper_broker_snapshot`(`snapshotId`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "anchorId",
+            "columnName": "anchorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountRef",
+            "columnName": "accountRef",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "brokerSnapshotId",
+            "columnName": "brokerSnapshotId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "baselineQty",
+            "columnName": "baselineQty",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "baselineProvenance",
+            "columnName": "baselineProvenance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderSequenceInclusive",
+            "columnName": "orderSequenceInclusive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lifecycleSequenceInclusive",
+            "columnName": "lifecycleSequenceInclusive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cutAssurance",
+            "columnName": "cutAssurance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activeKey",
+            "columnName": "activeKey",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "invalidatedAtEpochMillis",
+            "columnName": "invalidatedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "invalidationReason",
+            "columnName": "invalidationReason",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "anchorId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_paper_position_anchor_brokerSnapshotId",
+            "unique": false,
+            "columnNames": [
+              "brokerSnapshotId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_paper_position_anchor_brokerSnapshotId` ON `${TABLE_NAME}` (`brokerSnapshotId`)"
+          },
+          {
+            "name": "index_paper_position_anchor_activeKey",
+            "unique": true,
+            "columnNames": [
+              "activeKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_paper_position_anchor_activeKey` ON `${TABLE_NAME}` (`activeKey`)"
+          },
+          {
+            "name": "index_paper_position_anchor_accountRef_symbol",
+            "unique": false,
+            "columnNames": [
+              "accountRef",
+              "symbol"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_paper_position_anchor_accountRef_symbol` ON `${TABLE_NAME}` (`accountRef`, `symbol`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "paper_broker_snapshot",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "brokerSnapshotId"
+            ],
+            "referencedColumns": [
+              "snapshotId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "paper_position_anchor_cursor",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`anchorId` TEXT NOT NULL, `attemptId` TEXT NOT NULL, `orderId` TEXT, `clientOrderId` TEXT, `orderSequenceId` INTEGER, `symbol` TEXT, `side` TEXT, `includedFilledQty` TEXT NOT NULL, `provenance` TEXT NOT NULL, `observationSequence` INTEGER NOT NULL, `payloadFingerprint` TEXT NOT NULL, PRIMARY KEY(`anchorId`, `attemptId`), FOREIGN KEY(`anchorId`) REFERENCES `paper_position_anchor`(`anchorId`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "anchorId",
+            "columnName": "anchorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptId",
+            "columnName": "attemptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderId",
+            "columnName": "orderId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "clientOrderId",
+            "columnName": "clientOrderId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "orderSequenceId",
+            "columnName": "orderSequenceId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "includedFilledQty",
+            "columnName": "includedFilledQty",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "provenance",
+            "columnName": "provenance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "observationSequence",
+            "columnName": "observationSequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadFingerprint",
+            "columnName": "payloadFingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "anchorId",
+            "attemptId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": [
+          {
+            "table": "paper_position_anchor",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "anchorId"
+            ],
+            "referencedColumns": [
+              "anchorId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "paper_position_anchor_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `anchorId` TEXT NOT NULL, `version` INTEGER NOT NULL, `type` TEXT NOT NULL, `timestampEpochMillis` INTEGER NOT NULL, `reason` TEXT, `evidenceSnapshotId` TEXT NOT NULL, PRIMARY KEY(`eventId`), FOREIGN KEY(`anchorId`) REFERENCES `paper_position_anchor`(`anchorId`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorId",
+            "columnName": "anchorId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestampEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "evidenceSnapshotId",
+            "columnName": "evidenceSnapshotId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_paper_position_anchor_event_anchorId_version",
+            "unique": true,
+            "columnNames": [
+              "anchorId",
+              "version"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_paper_position_anchor_event_anchorId_version` ON `${TABLE_NAME}` (`anchorId`, `version`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "paper_position_anchor",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "anchorId"
+            ],
+            "referencedColumns": [
+              "anchorId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "paper_position_reconciliation_report",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`reportId` TEXT NOT NULL, `brokerSnapshotId` TEXT NOT NULL, `engineVersion` TEXT NOT NULL, `policyVersion` TEXT NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `accountRef` TEXT, `matchedCount` INTEGER NOT NULL, `mismatchedCount` INTEGER NOT NULL, `unanchoredCount` INTEGER NOT NULL, `unknownCount` INTEGER NOT NULL, `diagnosticsJson` TEXT NOT NULL, `inputsJson` TEXT NOT NULL, `inputsDigest` TEXT NOT NULL, `freshness` TEXT NOT NULL, `localEvidenceAlignment` TEXT NOT NULL, PRIMARY KEY(`reportId`), FOREIGN KEY(`brokerSnapshotId`) REFERENCES `paper_broker_snapshot`(`snapshotId`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "reportId",
+            "columnName": "reportId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "brokerSnapshotId",
+            "columnName": "brokerSnapshotId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "engineVersion",
+            "columnName": "engineVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "policyVersion",
+            "columnName": "policyVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMillis",
+            "columnName": "createdAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountRef",
+            "columnName": "accountRef",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "matchedCount",
+            "columnName": "matchedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mismatchedCount",
+            "columnName": "mismatchedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unanchoredCount",
+            "columnName": "unanchoredCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unknownCount",
+            "columnName": "unknownCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diagnosticsJson",
+            "columnName": "diagnosticsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inputsJson",
+            "columnName": "inputsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inputsDigest",
+            "columnName": "inputsDigest",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "freshness",
+            "columnName": "freshness",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localEvidenceAlignment",
+            "columnName": "localEvidenceAlignment",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "reportId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_paper_position_reconciliation_report_brokerSnapshotId",
+            "unique": false,
+            "columnNames": [
+              "brokerSnapshotId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_paper_position_reconciliation_report_brokerSnapshotId` ON `${TABLE_NAME}` (`brokerSnapshotId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "paper_broker_snapshot",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "brokerSnapshotId"
+            ],
+            "referencedColumns": [
+              "snapshotId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "paper_position_reconciliation_row",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`reportId` TEXT NOT NULL, `symbol` TEXT NOT NULL, `brokerQty` TEXT, `brokerProvenance` TEXT NOT NULL, `knownVelaDelta` TEXT, `knownDeltaProvenance` TEXT NOT NULL, `knownDeltaComplete` INTEGER NOT NULL, `anchorQty` TEXT, `anchorProvenance` TEXT NOT NULL, `expectedQty` TEXT, `expectedProvenance` TEXT NOT NULL, `difference` TEXT, `state` TEXT NOT NULL, `presence` TEXT NOT NULL, `diagnosticsJson` TEXT NOT NULL, `anchorId` TEXT, `cause` TEXT, PRIMARY KEY(`reportId`, `symbol`), FOREIGN KEY(`reportId`) REFERENCES `paper_position_reconciliation_report`(`reportId`) ON UPDATE NO ACTION ON DELETE NO ACTION , FOREIGN KEY(`anchorId`) REFERENCES `paper_position_anchor`(`anchorId`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "reportId",
+            "columnName": "reportId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "brokerQty",
+            "columnName": "brokerQty",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "brokerProvenance",
+            "columnName": "brokerProvenance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knownVelaDelta",
+            "columnName": "knownVelaDelta",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "knownDeltaProvenance",
+            "columnName": "knownDeltaProvenance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knownDeltaComplete",
+            "columnName": "knownDeltaComplete",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorQty",
+            "columnName": "anchorQty",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "anchorProvenance",
+            "columnName": "anchorProvenance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedQty",
+            "columnName": "expectedQty",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "expectedProvenance",
+            "columnName": "expectedProvenance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "difference",
+            "columnName": "difference",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "presence",
+            "columnName": "presence",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diagnosticsJson",
+            "columnName": "diagnosticsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorId",
+            "columnName": "anchorId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "cause",
+            "columnName": "cause",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "reportId",
+            "symbol"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_paper_position_reconciliation_row_anchorId",
+            "unique": false,
+            "columnNames": [
+              "anchorId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_paper_position_reconciliation_row_anchorId` ON `${TABLE_NAME}` (`anchorId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "paper_position_reconciliation_report",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "reportId"
+            ],
+            "referencedColumns": [
+              "reportId"
+            ]
+          },
+          {
+            "table": "paper_position_anchor",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "anchorId"
+            ],
+            "referencedColumns": [
+              "anchorId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "paper_order_decimal_evidence",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`observationId` INTEGER NOT NULL, `field` TEXT NOT NULL, `attemptId` TEXT NOT NULL, `orderId` TEXT NOT NULL, `clientOrderId` TEXT NOT NULL, `symbol` TEXT NOT NULL, `side` TEXT NOT NULL, `orderSequenceId` INTEGER NOT NULL, `accountRef` TEXT NOT NULL, `rawDecimal` TEXT NOT NULL, `canonicalDecimal` TEXT NOT NULL, `provenance` TEXT NOT NULL, `payloadFingerprint` TEXT NOT NULL, `parserVersion` TEXT NOT NULL, `recordedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`observationId`, `field`), FOREIGN KEY(`observationId`) REFERENCES `paper_order_lifecycle_observation`(`id`) ON UPDATE NO ACTION ON DELETE NO ACTION )",
+        "fields": [
+          {
+            "fieldPath": "observationId",
+            "columnName": "observationId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "field",
+            "columnName": "field",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptId",
+            "columnName": "attemptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderId",
+            "columnName": "orderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientOrderId",
+            "columnName": "clientOrderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "symbol",
+            "columnName": "symbol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "side",
+            "columnName": "side",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderSequenceId",
+            "columnName": "orderSequenceId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountRef",
+            "columnName": "accountRef",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawDecimal",
+            "columnName": "rawDecimal",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalDecimal",
+            "columnName": "canonicalDecimal",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "provenance",
+            "columnName": "provenance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadFingerprint",
+            "columnName": "payloadFingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parserVersion",
+            "columnName": "parserVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordedAtEpochMillis",
+            "columnName": "recordedAtEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "observationId",
+            "field"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_paper_order_decimal_evidence_attemptId",
+            "unique": false,
+            "columnNames": [
+              "attemptId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_paper_order_decimal_evidence_attemptId` ON `${TABLE_NAME}` (`attemptId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "paper_order_lifecycle_observation",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "observationId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6ef7a00554221e6e351c70bbbcc42560')"
+    ]
+  }
+}

@@ -15,6 +15,15 @@ import com.vela.android.lab.db.room.dao.PaperOrderPayloadPreviewDao
 import com.vela.android.lab.db.room.dao.PaperOrderReconciliationDao
 import com.vela.android.lab.db.room.dao.PaperOrderSubmitAuditDao
 import com.vela.android.lab.db.room.dao.SignalDao
+import com.vela.android.lab.db.room.dao.PaperPositionEvidenceDao
+import com.vela.android.lab.db.room.entities.PaperBrokerSnapshotEntity
+import com.vela.android.lab.db.room.entities.PaperBrokerPositionSnapshotEntity
+import com.vela.android.lab.db.room.entities.PaperPositionAnchorEntity
+import com.vela.android.lab.db.room.entities.PaperPositionAnchorCursorEntity
+import com.vela.android.lab.db.room.entities.PaperPositionAnchorEventEntity
+import com.vela.android.lab.db.room.entities.PaperPositionReconciliationReportEntity
+import com.vela.android.lab.db.room.entities.PaperPositionReconciliationRowEntity
+import com.vela.android.lab.db.room.entities.PaperOrderDecimalEvidenceEntity
 import com.vela.android.lab.db.room.entities.JournalEventEntity
 import com.vela.android.lab.db.room.entities.MarketBar1mEntity
 import com.vela.android.lab.db.room.entities.PaperOrderDryRunAuditEntity
@@ -27,6 +36,7 @@ import com.vela.android.lab.db.room.entities.SymbolSignalEntity
 import com.vela.android.lab.db.room.migrations.MIGRATION_4_5
 import com.vela.android.lab.db.room.migrations.MIGRATION_5_6
 import com.vela.android.lab.db.room.migrations.MIGRATION_6_7
+import com.vela.android.lab.db.room.migrations.MIGRATION_7_8
 
 /**
  * Phase 1.c Room database: the offline persistence foundation for
@@ -45,7 +55,7 @@ import com.vela.android.lab.db.room.migrations.MIGRATION_6_7
  * `app/schemas/com.vela.android.lab.db.room.VelaDatabase/1.json`.
  */
 @Database(
-    version = 7,
+    version = 8,
     exportSchema = true,
     entities = [
         MarketBar1mEntity::class,
@@ -57,6 +67,14 @@ import com.vela.android.lab.db.room.migrations.MIGRATION_6_7
         PaperOrderSubmitAuditEntity::class,
         PaperOrderReconciliationEntity::class,
         PaperOrderLifecycleObservationEntity::class,
+        PaperBrokerSnapshotEntity::class,
+        PaperBrokerPositionSnapshotEntity::class,
+        PaperPositionAnchorEntity::class,
+        PaperPositionAnchorCursorEntity::class,
+        PaperPositionAnchorEventEntity::class,
+        PaperPositionReconciliationReportEntity::class,
+        PaperPositionReconciliationRowEntity::class,
+        PaperOrderDecimalEvidenceEntity::class,
     ],
 )
 @TypeConverters(InstantConverter::class)
@@ -71,6 +89,7 @@ abstract class VelaDatabase : RoomDatabase() {
     abstract fun paperOrderPayloadPreviewDao(): PaperOrderPayloadPreviewDao
     abstract fun paperOrderSubmitAuditDao(): PaperOrderSubmitAuditDao
     abstract fun paperOrderReconciliationDao(): PaperOrderReconciliationDao
+    abstract fun paperPositionEvidenceDao(): PaperPositionEvidenceDao
 
     companion object {
         const val DATABASE_NAME: String = "vela-lab.db"
@@ -88,7 +107,7 @@ abstract class VelaDatabase : RoomDatabase() {
                 VelaDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 // Phase 2.q: dev-lab database; throwaway Phase 1.e
                 // bars / features / signals / journal rows are
                 // acceptable losses on schema bump. Watchlist + Paper

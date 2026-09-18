@@ -36,11 +36,13 @@ class PositionDomainIsolationTest {
         }
     }
 
-    @Test fun noProductionConsumerOrExecutorDependsOnThisDomainYet() {
+    @Test fun onlyTheExplicitEvidenceAdapterMayConsumeTheDomain() {
         val root = File(appRoot(), "src/main/kotlin")
         val outside = root.walkTopDown().filter { it.extension == "kt" && !it.toPath().startsWith(domainRoot().toPath()) }
         outside.forEach {
-            assertFalse(it.readText().contains("paper.reconciliation.domain"), "Unexpected wiring: ${it.name}")
+            if (!it.invariantSeparatorsPath.contains("/paper/reconciliation/evidence/")) {
+                assertFalse(it.readText().contains("paper.reconciliation.domain"), "Unexpected wiring: ${it.name}")
+            }
         }
     }
 
@@ -62,10 +64,10 @@ class PositionDomainIsolationTest {
         assertEquals(setOf("UNKNOWN"), PositionDifferenceCause.entries.map { it.name }.toSet())
     }
 
-    @Test fun roomRemainsV7AndNoDomainSchemaIsCreated() {
+    @Test fun roomV8IsAdditiveAndDomainRemainsPersistenceFree() {
         val database = File(appRoot(), "src/main/kotlin/com/vela/android/lab/db/room/VelaDatabase.kt").readText()
-        assertTrue(database.contains("version = 7,"))
+        assertTrue(database.contains("version = 8,"))
         assertFalse(database.contains("reconciliation.domain"))
-        assertFalse(File(appRoot(), "schemas/com.vela.android.lab.db.room.VelaDatabase/8.json").exists())
+        assertTrue(File(appRoot(), "schemas/com.vela.android.lab.db.room.VelaDatabase/7.json").exists())
     }
 }
