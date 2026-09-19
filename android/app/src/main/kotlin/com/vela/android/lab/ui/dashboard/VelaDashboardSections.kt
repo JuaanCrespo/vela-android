@@ -135,6 +135,7 @@ internal fun VelaDashboardSections(
     currentDestination: VelaDestination,
     data: VelaDashboardData,
     actions: VelaDashboardActions,
+    positionsContent: @Composable (PaddingValues) -> Unit = {},
 ) {
     val visualPreferences = data.preferences.preferences
     VelaAppShell(
@@ -172,6 +173,7 @@ internal fun VelaDashboardSections(
             VelaDestination.HISTORY -> HistorySection(data, actions, contentPadding)
             VelaDestination.SETTINGS -> SettingsSection(data, actions, contentPadding)
             VelaDestination.DIAGNOSTICS -> DiagnosticsSection(data, actions, contentPadding)
+            VelaDestination.POSITIONS -> positionsContent(contentPadding)
         }
     }
 }

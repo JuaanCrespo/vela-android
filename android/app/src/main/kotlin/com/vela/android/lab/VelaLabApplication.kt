@@ -48,6 +48,12 @@ import com.vela.android.lab.data.watchlist.WatchlistRepository
 import com.vela.android.lab.data.watchlist.WatchlistStore
 import com.vela.android.lab.db.room.VelaDatabase
 import com.vela.android.lab.ui.settings.VelaPreferencesStore
+import com.vela.android.lab.data.paper.reconciliation.evidence.RoomPositionEvidenceDatabase
+import com.vela.android.lab.data.paper.reconciliation.evidence.PaperBrokerPositionSnapshotRepository
+import com.vela.android.lab.data.paper.reconciliation.evidence.PaperCaptureConfiguration
+import com.vela.android.lab.data.paper.reconciliation.evidence.PaperPositionEvidenceCaptureCoordinator
+import com.vela.android.lab.data.paper.reconciliation.evidence.PaperPositionEvidenceHttpTransport
+import com.vela.android.lab.data.paper.reconciliation.integration.CanonicalPositionReconciliationStore
 
 /**
  * Process-scoped DI graph for the Android lab.
@@ -65,6 +71,15 @@ import com.vela.android.lab.ui.settings.VelaPreferencesStore
  *  - The Phase 1.e offline dashboard never touches any of these.
  */
 class VelaLabApplication : Application() {
+
+    /** Inert graph. Only the positions screen's explicit human refresh can capture. */
+    val positionReconciliationStore by lazy {
+        val evidence = RoomPositionEvidenceDatabase(database)
+        CanonicalPositionReconciliationStore(evidence, PaperPositionEvidenceCaptureCoordinator(
+            PaperCaptureConfiguration(alpacaCredentialsProvider), PaperPositionEvidenceHttpTransport(),
+            PaperBrokerPositionSnapshotRepository(evidence),
+        ))
+    }
 
     val database: VelaDatabase by lazy {
         VelaDatabase.create(this)

@@ -91,6 +91,14 @@ internal class InMemoryEvidenceDao : PaperPositionEvidenceDao {
 
     override suspend fun snapshotHistory(): List<PaperBrokerSnapshotEntity> = brokerSnapshots.values.sortedByDescending { it.sequence }
 
+    override suspend fun allAnchors(): List<PaperPositionAnchorEntity> = anchors.values
+        .sortedWith(compareBy({ it.createdAtEpochMillis }, { it.anchorId }))
+
+    override suspend fun latestReportId(): String? = reports.values.sortedWith(
+        compareByDescending<PaperPositionReconciliationReportEntity> { brokerSnapshots.getValue(it.brokerSnapshotId).sequence }
+            .thenByDescending { it.createdAtEpochMillis }.thenByDescending { it.reportId },
+    ).firstOrNull()?.reportId
+
     override suspend fun positions(snapshotId: String): List<PaperBrokerPositionSnapshotEntity> = brokerPositions
         .filter { it.snapshotId == snapshotId }.sortedBy { it.rowIndex }
 

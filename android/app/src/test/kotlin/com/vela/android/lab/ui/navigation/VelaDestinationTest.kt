@@ -18,9 +18,9 @@ class VelaDestinationTest {
     }
 
     @Test
-    fun `more contains the four required secondary destinations`() {
+    fun `more retains existing destinations and adds read only Paper positions`() {
         assertEquals(
-            listOf("Riesgo", "Historial y auditoría", "Configuración", "Diagnóstico"),
+            listOf("Riesgo", "Historial y auditoría", "Configuración", "Diagnóstico", "Posiciones Paper"),
             VelaDestination.secondaryDestinations.map(VelaDestination::label),
         )
         assertTrue(VelaDestination.secondaryDestinations.all(VelaDestination::isMoreSection))

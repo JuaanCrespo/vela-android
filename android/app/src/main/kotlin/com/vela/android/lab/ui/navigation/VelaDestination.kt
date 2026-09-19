@@ -20,6 +20,7 @@ enum class VelaDestination(
     HISTORY(route = "historial", label = "Historial y auditoría"),
     SETTINGS(route = "configuracion", label = "Configuración"),
     DIAGNOSTICS(route = "diagnostico", label = "Diagnóstico"),
+    POSITIONS(route = "posiciones-paper", label = "Posiciones Paper"),
     ;
 
     val isPrimary: Boolean
@@ -52,6 +53,7 @@ enum class VelaDestination(
             HISTORY,
             SETTINGS,
             DIAGNOSTICS,
+            POSITIONS,
         )
 
         private val destinationByRoute: Map<String, VelaDestination> =

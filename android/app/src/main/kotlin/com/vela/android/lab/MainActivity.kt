@@ -23,6 +23,8 @@ import com.vela.android.lab.ui.dashboard.WatchlistViewModel
 import com.vela.android.lab.ui.history.PaperOrderHistoryViewModel
 import com.vela.android.lab.ui.settings.VelaPreferencesViewModel
 import com.vela.android.lab.ui.theme.VelaLabTheme
+import com.vela.android.lab.ui.positions.PositionReconciliationRoute
+import com.vela.android.lab.ui.positions.PositionReconciliationViewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -66,6 +68,12 @@ class MainActivity : ComponentActivity() {
 
     private val preferencesViewModel: VelaPreferencesViewModel by viewModels { preferencesFactory() }
 
+    private val positionsViewModel: PositionReconciliationViewModel by viewModels {
+        viewModelFactory { initializer {
+            PositionReconciliationViewModel((application as VelaLabApplication).positionReconciliationStore)
+        } }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -87,6 +95,8 @@ class MainActivity : ComponentActivity() {
                         if (BuildConfig.DEBUG) paperManualSubmitViewModel else null,
                     candlesViewModel = candlesViewModel,
                     preferencesViewModel = preferencesViewModel,
+                    // The lazy ViewModel is accessed only when this destination is composed.
+                    positionsContent = { padding -> PositionReconciliationRoute(positionsViewModel, padding) },
                 )
             }
         }

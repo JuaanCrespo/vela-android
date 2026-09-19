@@ -45,6 +45,13 @@ interface PaperPositionEvidenceDao {
     @Query("SELECT * FROM paper_broker_snapshot ORDER BY sequence DESC")
     suspend fun snapshotHistory(): List<PaperBrokerSnapshotEntity>
 
+    @Query("SELECT * FROM paper_position_anchor ORDER BY createdAtEpochMillis ASC, anchorId ASC")
+    suspend fun allAnchors(): List<PaperPositionAnchorEntity>
+
+    // Snapshot sequence, not wall-clock time, orders reports from explicit captures.
+    @Query("SELECT r.reportId FROM paper_position_reconciliation_report r JOIN paper_broker_snapshot s ON s.snapshotId = r.brokerSnapshotId ORDER BY s.sequence DESC, r.createdAtEpochMillis DESC, r.reportId DESC LIMIT 1")
+    suspend fun latestReportId(): String?
+
     @Query("SELECT * FROM paper_broker_position_snapshot WHERE snapshotId = :snapshotId ORDER BY rowIndex ASC")
     suspend fun positions(snapshotId: String): List<PaperBrokerPositionSnapshotEntity>
 
@@ -79,4 +86,3 @@ interface PaperPositionEvidenceDao {
     suspend fun lifecycleHighWater(): Long
 
 }
-

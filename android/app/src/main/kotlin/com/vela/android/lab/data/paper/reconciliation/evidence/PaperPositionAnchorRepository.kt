@@ -22,7 +22,31 @@ class PaperPositionAnchorRepository(private val database: PositionEvidenceDataba
         create(anchor, brokerSnapshotId, scopeAssurance)
     }
 
-    private suspend fun create(anchor: PositionAnchor, brokerSnapshotId: String, scopeAssurance: CutAssurance): StoredPositionAnchor {
+    /** Read-only proposal. Creation rechecks the SAME domain/repository invariants transactionally. */
+    suspend fun prepareAnchor(anchorId: String, symbol: String, brokerSnapshotId: String,
+        scopeAssurance: CutAssurance, at: Long): PositionAnchor = database.transaction {
+        val snapshot = requireNotNull(snapshots.get(brokerSnapshotId))
+        val accountRef = requireNotNull(snapshot.metadata.accountRef)
+        require(database.evidence.activeAnchor(symbol, accountRef) == null) { "Active anchor conflict" }
+        val input = history.read(accountRef, scopeAssurance)
+        val fills = LocalPositionExpectationEngine().evaluate(input).positions.singleOrNull { it.symbol == symbol }?.orderFills.orEmpty()
+        val cursors = fills.map { fill ->
+            val order = input.histories.single { it.submitAttemptId == fill.identity.attemptId }
+            val observation = requireNotNull(order.lifecycleObservations.filter {
+                it.databaseId <= snapshot.metadata.lifecycleSequenceInclusive
+            }.maxByOrNull { it.databaseId })
+            AnchorOrderCursor(fill.identity, fill.observationQuantities[observation.databaseId] ?: QuantityEvidence.UNKNOWN,
+                observation.databaseId, observation.payloadFingerprint)
+        }
+        val anchor = PositionAnchor(anchorId, symbol, accountRef,
+            snapshot.domain().positions.singleOrNull { it.symbol == symbol }?.quantity ?: QuantityEvidence.ZERO,
+            AnchorCoverageCut(snapshot.metadata.orderSequenceInclusive, snapshot.metadata.lifecycleSequenceInclusive, CutAssurance.CONFIRMED),
+            cursors, AnchorStatus.ACTIVE, at)
+        validateCreation(anchor, brokerSnapshotId, scopeAssurance)
+        anchor
+    }
+
+    private suspend fun validateCreation(anchor: PositionAnchor, brokerSnapshotId: String, scopeAssurance: CutAssurance): String {
         val snapshot = requireNotNull(snapshots.get(brokerSnapshotId))
         require(snapshot.anchorEligible && snapshot.metadata.accountRef == anchor.accountRef && validEvidenceSymbol(anchor.symbol))
         require(snapshots.historyCheckpoint().digest == snapshot.metadata.localHistoryDigest) { "Local evidence changed since capture" }
@@ -35,6 +59,11 @@ class PaperPositionAnchorRepository(private val database: PositionEvidenceDataba
         require(LocalPositionExpectationEngine().evaluate(input, listOf(anchor)).positions.single { it.symbol == anchor.symbol }.coverage == PositionCoverage.ANCHORED) {
             "Anchor evidence or coverage is not sufficient"
         }
+        return baseline
+    }
+
+    private suspend fun create(anchor: PositionAnchor, brokerSnapshotId: String, scopeAssurance: CutAssurance): StoredPositionAnchor {
+        val baseline = validateCreation(anchor, brokerSnapshotId, scopeAssurance)
         val entity = PaperPositionAnchorEntity(anchor.anchorId, anchor.symbol, anchor.accountRef, brokerSnapshotId,
             baseline, anchor.baselineQty.provenance.name, anchor.cut.orderSequenceInclusive, anchor.cut.lifecycleSequenceInclusive,
             anchor.cut.assurance.name, AnchorStatus.ACTIVE.name, "${anchor.accountRef}|${anchor.symbol}", anchor.createdAtEpochMillis, null, null, 1)

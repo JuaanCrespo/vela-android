@@ -96,6 +96,7 @@ fun OfflineDashboardScreen(
     paperManualSubmitViewModel: PaperManualSubmitViewModel? = null,
     candlesViewModel: CandlesViewModel? = null,
     preferencesViewModel: VelaPreferencesViewModel? = null,
+    positionsContent: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val alpacaState = alpacaViewModel?.uiState?.collectAsStateWithLifecycle()?.value
@@ -174,6 +175,7 @@ fun OfflineDashboardScreen(
     }
     VelaDashboardSections(
         currentDestination = currentDestination,
+        positionsContent = positionsContent,
         data = VelaDashboardData(
             dashboard = state,
             alpaca = alpacaState,

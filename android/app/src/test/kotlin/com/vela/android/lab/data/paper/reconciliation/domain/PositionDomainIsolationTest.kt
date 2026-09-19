@@ -36,11 +36,23 @@ class PositionDomainIsolationTest {
         }
     }
 
-    @Test fun onlyTheExplicitEvidenceAdapterMayConsumeTheDomain() {
+    @Test fun onlyExplicitEvidenceAndReadOnlyIntegrationMayConsumeTheDomain() {
         val root = File(appRoot(), "src/main/kotlin")
+        // Phase 2.y.4 adds these exact consumers, not a blanket UI/dashboard exception.
+        val integration = setOf(
+            "com/vela/android/lab/data/paper/reconciliation/integration/PositionReconciliationStore.kt",
+            "com/vela/android/lab/ui/positions/PositionReconciliationUiState.kt",
+            "com/vela/android/lab/ui/positions/PositionReconciliationViewModel.kt",
+            "com/vela/android/lab/ui/positions/PositionReconciliationScreen.kt",
+        )
+        integration.forEach { path ->
+            val text = File(root, path).readText()
+            assertFalse(Regex("import .*data\\.paper\\.(submit|preflight)|PaperManualSubmit|PaperOrderExecutor").containsMatchIn(text), path)
+        }
         val outside = root.walkTopDown().filter { it.extension == "kt" && !it.toPath().startsWith(domainRoot().toPath()) }
         outside.forEach {
-            if (!it.invariantSeparatorsPath.contains("/paper/reconciliation/evidence/")) {
+            if (!it.invariantSeparatorsPath.contains("/paper/reconciliation/evidence/") &&
+                it.relativeTo(root).invariantSeparatorsPath !in integration) {
                 assertFalse(it.readText().contains("paper.reconciliation.domain"), "Unexpected wiring: ${it.name}")
             }
         }
