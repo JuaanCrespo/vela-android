@@ -12,6 +12,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vela.android.lab.data.paper.reconciliation.domain.AnchorStatus
 import com.vela.android.lab.data.paper.reconciliation.domain.BrokerSnapshotCompleteness
 import com.vela.android.lab.data.paper.reconciliation.domain.PositionDiagnostic
+import com.vela.android.lab.data.paper.reconciliation.domain.PositionCoverageMode
 import com.vela.android.lab.data.paper.reconciliation.evidence.CaptureDiagnostic
 import com.vela.android.lab.data.paper.reconciliation.evidence.StoredBrokerSnapshot
 import com.vela.android.lab.data.paper.reconciliation.evidence.readEnumNames
@@ -52,6 +53,8 @@ fun PositionReconciliationScreen(
         if (state.loadingLocal) Text("Leyendo estado durable local…")
         if (state.workingLocal) Text("Operación local en curso…")
         state.error?.let { Text(it.name, color = MaterialTheme.colorScheme.error) }
+        state.baselineBlockedReason?.let { Text("Confirmación bloqueada: $it") }
+        if (state.invalidBootstrapEvidence) Text("INVALID_BOOTSTRAP_MANIFEST — comparación bloqueada.")
         if (state.durable.latestComplete == null) Text("NO BROKER SNAPSHOT YET")
         SnapshotCard("Last attempt", state.durable.lastAttempt)
         SnapshotCard("Latest complete snapshot (histórico)", state.durable.latestComplete)
@@ -73,8 +76,15 @@ fun PositionReconciliationScreen(
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(row.symbol, style = MaterialTheme.typography.titleMedium)
                     Text("Broker observed: ${row.brokerObserved}")
-                    Text("VELA known delta: ${row.knownVelaDelta}")
-                    Text("Delta completo: ${row.knownDeltaComplete}")
+                    if (row.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1) {
+                        Text("Coverage mode: ${row.coverageMode}")
+                        Text("Histórico anterior conocido (informativo): ${row.historicalKnownDelta}")
+                        Text("Delta exacto posterior al anchor: ${row.postAnchorExactDelta}")
+                        Text("Cobertura posterior: ${row.postAnchorAssurance}")
+                    } else {
+                        Text("VELA known delta: ${row.knownVelaDelta}")
+                        Text("Delta completo: ${row.knownDeltaComplete}")
+                    }
                     Text("Baseline: ${row.baseline}")
                     Text("VELA expected: ${row.expected}")
                     Text("Difference: ${row.difference}")
@@ -95,6 +105,7 @@ fun PositionReconciliationScreen(
                     Text("${anchor.metadata.symbol} — ACTIVE — ${anchor.metadata.baselineQty}")
                     Text("Paper account: ${safePaperAccountLabel(anchor.metadata.accountRef)}")
                     Text("Anchor: ${anchor.metadata.anchorId}")
+                    Text("Coverage mode: ${anchor.metadata.coverageMode}")
                     OutlinedButton(onClick = { onRequestInvalidate(anchor.metadata.anchorId) }, enabled = !state.busy && state.dialog == null) {
                         Text("Invalidar baseline")
                     }
@@ -108,6 +119,8 @@ fun PositionReconciliationScreen(
         state.selectedBaseline?.let { choice ->
             Text("Símbolo seleccionado: ${choice.symbol}")
             choice.blockedReason?.let { Text("Baseline deshabilitado: $it") }
+            choice.blockedDiagnostic?.let { Text("Motivo: $it") }
+            choice.proposal?.let { Text("Modo propuesto: ${it.coverageMode}") }
         }
         OutlinedButton(onClick = onRequestEstablish, enabled = state.canEstablish) { Text("Establecer baseline") }
         Text("Después de cambiar un baseline, la comparación autoritativa requiere un futuro Refresh positions.")
@@ -132,11 +145,16 @@ fun PositionReconciliationScreen(
                     Text("Snapshot: ${snapshot.snapshotId}")
                     Text("Capturado: ${timestamp(snapshot.completedAtEpochMillis)}")
                     Text("Broker baseline quantity: ${quantityText(proposal.baselineQty)}")
+                    Text("Coverage mode: ${proposal.coverageMode}")
                     Text("Local history checkpoint: ${proposal.cut.orderSequenceInclusive} / ${proposal.cut.lifecycleSequenceInclusive}")
                     Text("Coverage: ${proposal.cut.assurance}; cursors: ${proposal.cursors.size}")
                     Text("Known VELA delta: ${quantityText(dialog.selection.knownDelta)}")
                     Text("El baseline es un punto de partida local aceptado, no una reconstrucción de la cuenta.")
                     Text("Aceptar este baseline NO verifica ni reconstruye actividad anterior de la cuenta.")
+                    if (proposal.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1) {
+                        Text(BOOTSTRAP_CONFIRMATION_WARNING)
+                        Text("El delta histórico es informativo: NO se suma a este baseline.")
+                    }
                 }
             }, confirmButton = { TextButton(onClick = onConfirmEstablish, enabled = !state.busy) { Text("Confirmar baseline") } },
                 dismissButton = { TextButton(onClick = onDismissDialog) { Text("Volver") } })
@@ -155,6 +173,10 @@ fun PositionReconciliationScreen(
         null -> Unit
     }
 }
+
+internal const val BOOTSTRAP_CONFIRMATION_WARNING = "Aceptás la cantidad observada por el broker como punto de partida para este símbolo. " +
+    "VELA no certifica ni reconstruye la actividad anterior a este snapshot. " +
+    "Esta acción no envía órdenes ni modifica posiciones del broker."
 
 @Composable
 private fun SnapshotCard(title: String, snapshot: StoredBrokerSnapshot?) {

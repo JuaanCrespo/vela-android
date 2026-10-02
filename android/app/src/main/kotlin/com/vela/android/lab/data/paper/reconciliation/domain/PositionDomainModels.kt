@@ -22,6 +22,8 @@ enum class PositionDiagnostic {
     BROKER_SNAPSHOT_PARTIAL, BROKER_SNAPSHOT_STALE, BROKER_FRESHNESS_UNKNOWN,
     BROKER_LOCAL_CUT_UNCONFIRMED,
     BROKER_SYMBOL_ABSENT, UNEXPLAINED_POSITION_DIFFERENCE, ANCHOR_SHOULD_INVALIDATE,
+    INVALID_BOOTSTRAP_MANIFEST, BOOTSTRAP_OPEN_OR_UNCERTAIN_ORDER, BOOTSTRAP_CROSS_CUT_EVIDENCE,
+    BOOTSTRAP_POST_EVIDENCE_MISSING,
 }
 
 data class PositionOrderIdentity(
@@ -84,6 +86,9 @@ data class PositionAnchor(
     val createdAtEpochMillis: Long,
     val invalidatedAtEpochMillis: Long? = null,
     val invalidationReason: AnchorInvalidationReason? = null,
+    val coverageMode: PositionCoverageMode = PositionCoverageMode.EXACT_CURSORS_V1,
+    val bootstrapCut: BootstrapCutManifest? = null,
+    val bootstrapCutDigest: String? = null,
 )
 
 /** COMPLETE is a caller assertion about the entire scoped history, never a latest-N window. */
@@ -106,6 +111,7 @@ data class LocalSymbolPositionState(
     val anchor: PositionAnchor?,
     val diagnostics: Set<PositionDiagnostic>,
     val orderFills: List<RealizedOrderFill>,
+    val coverageMetadata: PositionCoverageMetadata? = null,
 )
 data class LocalExpectedPositionState(
     val accountRef: String?,
@@ -152,6 +158,7 @@ data class PositionReconciliationRow(
     val diagnostics: Set<PositionDiagnostic>,
     val anchorId: String?,
     val cause: PositionDifferenceCause? = null,
+    val coverageMetadata: PositionCoverageMetadata? = null,
 )
 data class PositionReconciliationSummary(
     val matchedCount: Int,

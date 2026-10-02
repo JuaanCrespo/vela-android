@@ -17,7 +17,7 @@ class PositionDomainIsolationTest {
             "com.vela.android.lab.data.paper.history.PaperHistoryIntegrityStatus",
         )
         val files = domainRoot().walkTopDown().filter { it.extension == "kt" }.toList()
-        assertEquals(5, files.size)
+        assertEquals(6, files.size)
         files.forEach { file ->
             val text = file.readText()
             val imports = Regex("(?m)^import ([^\\r\\n]+)").findAll(text).map { it.groupValues[1] }.toSet()
@@ -61,7 +61,7 @@ class PositionDomainIsolationTest {
     @Test fun resultSurfaceContainsOnlyObservationsAndDiagnostics() {
         val expectedFields = mapOf(
             PositionReconciliationReport::class.java to setOf("snapshotId", "rows", "summary", "diagnostics"),
-            PositionReconciliationRow::class.java to setOf("symbol", "brokerQty", "knownVelaDelta", "knownDeltaComplete", "anchorQty", "expectedQty", "difference", "state", "presence", "diagnostics", "anchorId", "cause"),
+            PositionReconciliationRow::class.java to setOf("symbol", "brokerQty", "knownVelaDelta", "knownDeltaComplete", "anchorQty", "expectedQty", "difference", "state", "presence", "diagnostics", "anchorId", "cause", "coverageMetadata"),
             PositionReconciliationSummary::class.java to setOf("matchedCount", "mismatchedCount", "unanchoredCount", "unknownCount"),
         )
         expectedFields.forEach { (type, fields) ->
@@ -76,9 +76,9 @@ class PositionDomainIsolationTest {
         assertEquals(setOf("UNKNOWN"), PositionDifferenceCause.entries.map { it.name }.toSet())
     }
 
-    @Test fun roomV8IsAdditiveAndDomainRemainsPersistenceFree() {
+    @Test fun roomV9IsAdditiveAndDomainRemainsPersistenceFree() {
         val database = File(appRoot(), "src/main/kotlin/com/vela/android/lab/db/room/VelaDatabase.kt").readText()
-        assertTrue(database.contains("version = 8,"))
+        assertTrue(database.contains("version = 9,"))
         assertFalse(database.contains("reconciliation.domain"))
         assertTrue(File(appRoot(), "schemas/com.vela.android.lab.db.room.VelaDatabase/7.json").exists())
     }

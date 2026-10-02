@@ -11,7 +11,14 @@ internal data class DurablePositionInputs(val history: PositionHistoryInput, val
  * Legacy Double values round-trip as explicitly legacy text, never exact source decimals.
  */
 internal object PositionEvidenceCodec {
-    fun encode(value: DurablePositionInputs): String = JSONObject()
+    fun encode(value: DurablePositionInputs): String = if (value.anchors.any { it.coverageMode != PositionCoverageMode.EXACT_CURSORS_V1 }) {
+        array(2, encodeV1(value.copy(anchors = emptyList())), JSONArray(value.anchors.map { item ->
+            array(anchor(item), item.coverageMode.name, item.bootstrapCut?.let(BootstrapEvidenceCodec::encode), item.bootstrapCutDigest)
+        })).toString()
+    } else encodeV1(value)
+
+    // Kept byte-for-byte compatible for the historical checkpoint algorithm and V1 reports.
+    private fun encodeV1(value: DurablePositionInputs): String = JSONObject()
         .put("version", 1).put("accountRef", value.history.accountRef ?: JSONObject.NULL)
         .put("completeness", value.history.completeness.name)
         .put("history", JSONArray(value.history.histories.map(::history)))
@@ -23,6 +30,21 @@ internal object PositionEvidenceCodec {
         })).put("anchors", JSONArray(value.anchors.map(::anchor))).toString()
 
     fun decode(text: String): DurablePositionInputs {
+        if (text.startsWith("[")) {
+            val root = JSONArray(text)
+            require(root.length() == 3 && root.getInt(0) == 2)
+            val history = decode(root.getString(1)).history
+            return DurablePositionInputs(history, root.getJSONArray(2).items().map {
+                val item = it as JSONArray
+                require(item.length() == 4)
+                val mode = PositionCoverageMode.valueOf(item.getString(1))
+                val digest = item.text(3)
+                val manifest = item.text(2)?.let { json -> BootstrapEvidenceCodec.decode(json, requireNotNull(digest)) }
+                require((mode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1) == (manifest != null))
+                require((manifest != null) == (digest != null))
+                readAnchor(item.getJSONArray(0)).copy(coverageMode = mode, bootstrapCut = manifest, bootstrapCutDigest = digest)
+            })
+        }
         val root = JSONObject(text)
         require(root.getInt("version") == 1)
         val decimals = root.getJSONArray("decimals").items().associate { item ->
@@ -65,7 +87,7 @@ internal object PositionEvidenceCodec {
     private fun JSONArray.long(index: Int): Long? = if (isNull(index)) null else getLong(index)
     private fun JSONArray.items(): List<Any> = (0 until length()).map(::get)
 
-    private fun history(value: CanonicalPaperOrderHistory) = array(
+    internal fun history(value: CanonicalPaperOrderHistory) = array(
         value.submitAttemptId,
         value.orderSequenceId,
         value.linkedClientDryRunId,
@@ -97,7 +119,7 @@ internal object PositionEvidenceCodec {
         value.integrityStatus.name,
         JSONArray(value.integrityDiagnostics.map { it.name }),
     )
-    private fun readHistory(row: JSONArray): CanonicalPaperOrderHistory {
+    internal fun readHistory(row: JSONArray): CanonicalPaperOrderHistory {
         require(row.length() == 30)
         return CanonicalPaperOrderHistory(
             submitAttemptId = row.getString(0),
@@ -166,4 +188,3 @@ internal object PositionEvidenceCodec {
         )
     }
 }
-

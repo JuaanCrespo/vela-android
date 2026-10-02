@@ -8,7 +8,7 @@ import java.util.Locale
 
 /** Reads canonical evidence only; no consolidation, repair or use of the legacy FILLED shortcut. */
 class OrderRealizedFillDeriver {
-    fun derive(history: CanonicalPaperOrderHistory, decimals: OrderDecimalEvidence? = null): RealizedOrderFill {
+    fun derive(history: CanonicalPaperOrderHistory, decimals: OrderDecimalEvidence? = null, exactSourceProjection: Boolean = false): RealizedOrderFill {
         val diagnostics = linkedSetOf<PositionDiagnostic>()
         var inconsistent = false
         var uncertain = false
@@ -33,7 +33,8 @@ class OrderRealizedFillDeriver {
         fun select(legacy: QuantityEvidence, explicit: QuantityEvidence?): QuantityEvidence {
             if (explicit == null) return legacy
             if (explicit == QuantityEvidence.UNKNOWN && legacy == QuantityEvidence.UNKNOWN) return explicit
-            if (!explicit.exact || explicit.quantity != legacy.quantity) {
+            if (!explicit.exact || (explicit.quantity != legacy.quantity &&
+                    !(exactSourceProjection && legacyProjectionMatches(explicit, legacy)))) {
                 reject(PositionDiagnostic.DECIMAL_EVIDENCE_MISMATCH)
             }
             return explicit
@@ -58,6 +59,7 @@ class OrderRealizedFillDeriver {
         var completeness = FillCompleteness.UNKNOWN
         var firstTerminal: com.vela.android.lab.data.paper.history.CanonicalPaperLifecycleObservation? = null
         var previousFingerprint: String? = null
+        var previousQuantity = QuantityEvidence.UNKNOWN
         for (observation in observations) {
             val raw = observation.rawStatus
             val terminal = raw in terminalStatuses
@@ -102,6 +104,13 @@ class OrderRealizedFillDeriver {
                     explicit.payloadFingerprint != observation.payloadFingerprint)
             ) reject(PositionDiagnostic.DECIMAL_EVIDENCE_MISMATCH)
             val quantity = select(QuantityEvidence.legacy(observation.filledQuantity), explicit?.filledQuantity)
+            firstTerminal?.let { previous ->
+                val terminalQuantity = quantities[previous.databaseId]
+                // Source-exact quantities remain authoritative when legacy projections collide; V1 stays unchanged.
+                if (exactSourceProjection && terminalQuantity?.exact == true && quantity.exact && terminalQuantity.quantity != quantity.quantity) {
+                    reject(PositionDiagnostic.TERMINAL_CHANGED)
+                }
+            }
             quantities[observation.databaseId] = quantity
             if (quantity.provenance == DecimalProvenance.INVALID ||
                 quantity.quantity?.let { it < DecimalQuantity.ZERO } == true
@@ -128,8 +137,10 @@ class OrderRealizedFillDeriver {
                 lastKnown = quantity
                 completeness = if (terminal) FillCompleteness.TERMINAL else FillCompleteness.OPEN
             }
-            if (observation.payloadFingerprint == previousFingerprint) diagnostics += PositionDiagnostic.REPEATED_OBSERVATION
+            val exactQuantityChanged = exactSourceProjection && previousQuantity.exact && quantity.exact && previousQuantity.quantity != quantity.quantity
+            if (observation.payloadFingerprint == previousFingerprint && !exactQuantityChanged) diagnostics += PositionDiagnostic.REPEATED_OBSERVATION
             previousFingerprint = observation.payloadFingerprint
+            previousQuantity = quantity
             if (firstTerminal == null && terminal) firstTerminal = observation
         }
         if (lastKnown.quantity == null) {

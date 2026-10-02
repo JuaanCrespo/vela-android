@@ -35,12 +35,29 @@ class PaperCaptureConfiguration(private val provider: AlpacaCredentialsProvider)
     private val sessionRef = UUID.randomUUID().toString()
     private var generation = 0L
     private var previous: AlpacaCredentials? = null
+    private var verifiedAccount: Pair<String, String>? = null
     suspend fun read(): PaperCaptureSession = mutex.withLock {
         val current = provider.read()
-        if (current != previous) { generation++; previous = current }
+        if (current != previous) { generation++; previous = current; verifiedAccount = null }
         PaperCaptureSession(current, "$sessionRef:$generation", sessionRef)
     }
     suspend fun isCurrent(session: PaperCaptureSession): Boolean = read().configRef == session.configRef
+    suspend fun clearAccountBinding() = mutex.withLock { verifiedAccount = null }
+
+    /** In-memory binding established ONLY by the already-authorized account capture. Never persisted credentials. */
+    suspend fun rememberAccount(session: PaperCaptureSession, accountRef: String) {
+        read()
+        mutex.withLock {
+            if (session.credentials != null && session.credentials == previous && session.configRef == "$sessionRef:$generation" && validAccountRef(accountRef)) {
+                verifiedAccount = session.configRef to accountRef
+            }
+        }
+    }
+
+    suspend fun accountRefFor(credentials: AlpacaCredentials): String? {
+        read()
+        return mutex.withLock { verifiedAccount?.takeIf { previous == credentials && it.first == "$sessionRef:$generation" }?.second }
+    }
 }
 
 fun interface PaperCaptureTransport {

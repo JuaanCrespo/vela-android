@@ -1,6 +1,7 @@
 package com.vela.android.lab.db.room.entities
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.ForeignKey
 import androidx.room.Index
 
@@ -80,6 +81,9 @@ data class PaperPositionAnchorEntity(
     val invalidatedAtEpochMillis: Long?,
     val invalidationReason: String?,
     val version: Long,
+    @ColumnInfo(defaultValue = "'EXACT_CURSORS_V1'") val coverageMode: String = "EXACT_CURSORS_V1",
+    val bootstrapCutJson: String? = null,
+    val bootstrapCutDigest: String? = null,
 )
 
 @Entity(
@@ -165,6 +169,7 @@ data class PaperPositionReconciliationRowEntity(
     val diagnosticsJson: String,
     val anchorId: String?,
     val cause: String?,
+    val coverageJson: String? = null,
 )
 
 @Entity(

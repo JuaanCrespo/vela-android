@@ -15,7 +15,9 @@ data class DurablePositionOverview(
 )
 
 enum class PositionRefreshResult { SUCCESS, BUSY, BROKER_READ_FAILED, CAPTURE_PERSISTENCE_FAILED, RECONCILIATION_PERSISTENCE_FAILED }
-enum class BaselineBlockedReason { NO_SNAPSHOT, INVALID_SYMBOL, SNAPSHOT_INELIGIBLE, SNAPSHOT_NOT_FRESH, ACTIVE_CONFLICT, INSUFFICIENT_LOCAL_EVIDENCE }
+enum class BaselineBlockedReason { NO_SNAPSHOT, INVALID_SYMBOL, SNAPSHOT_INELIGIBLE, SNAPSHOT_NOT_FRESH, ACTIVE_CONFLICT, INSUFFICIENT_LOCAL_EVIDENCE,
+    SNAPSHOT_CHANGED, CONFIGURATION_CHANGED, HISTORY_CHANGED }
+class BaselineValidationException(val reason: BaselineBlockedReason) : IllegalArgumentException(reason.name)
 
 data class BaselineSelection(
     val symbol: String,
@@ -23,6 +25,7 @@ data class BaselineSelection(
     val proposal: PositionAnchor? = null,
     val knownDelta: QuantityEvidence = QuantityEvidence.UNKNOWN,
     val blockedReason: BaselineBlockedReason? = null,
+    val blockedDiagnostic: PositionDiagnostic? = null,
 ) {
     val eligible: Boolean get() = proposal != null && blockedReason == null
 }
@@ -64,7 +67,10 @@ class CanonicalPositionReconciliationStore(
         DurablePositionOverview(
             snapshots.history().firstOrNull()?.let { snapshots.get(it.snapshotId) },
             snapshots.latestComplete(),
-            database.evidence.allAnchors().map { requireNotNull(anchors.get(it.anchorId)) },
+            database.evidence.allAnchors().map { requireNotNull(anchors.get(it.anchorId)).also { stored ->
+                if (stored.metadata.coverageMode != PositionCoverageMode.EXACT_CURSORS_V1.name ||
+                    stored.metadata.bootstrapCutJson != null || stored.metadata.bootstrapCutDigest != null) stored.domain()
+            } },
             report,
             report?.let { snapshots.get(it.metadata.brokerSnapshotId)?.metadata?.completedAtEpochMillis },
         )
@@ -112,7 +118,7 @@ class CanonicalPositionReconciliationStore(
             BaselineSelection(normalized, snapshot = snapshot, blockedReason = reason)
         if (!validPositionSymbol(normalized)) return@transaction blocked(BaselineBlockedReason.INVALID_SYMBOL)
         val snapshot = snapshots.latestComplete() ?: return@transaction blocked(BaselineBlockedReason.NO_SNAPSHOT)
-        if (!snapshot.anchorEligible) return@transaction blocked(BaselineBlockedReason.SNAPSHOT_INELIGIBLE, snapshot)
+        if (!snapshot.anchorEligible || !coordinator.isCurrentSnapshot(snapshot)) return@transaction blocked(BaselineBlockedReason.SNAPSHOT_INELIGIBLE, snapshot)
         if (policy.freshness(snapshot.metadata.completedAtEpochMillis, now()) != SnapshotFreshness.FRESH) {
             return@transaction blocked(BaselineBlockedReason.SNAPSHOT_NOT_FRESH, snapshot)
         }
@@ -122,22 +128,35 @@ class CanonicalPositionReconciliationStore(
         }
         val scope = scopeAssurance(accountRef)
         try {
-            val proposal = anchors.prepareAnchor(newId(), normalized, snapshot.metadata.snapshotId, scope, now())
+            val proposal = try { anchors.prepareAnchor(newId(), normalized, snapshot.metadata.snapshotId, scope, now()) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: IllegalArgumentException) { anchors.prepareBootstrapAnchor(newId(), normalized, snapshot.metadata.snapshotId, now()) }
             val local = LocalPositionExpectationEngine().evaluate(history.read(accountRef, scope))
             BaselineSelection(normalized, snapshot, proposal,
                 local.positions.singleOrNull { it.symbol == normalized }?.knownVelaFillDelta ?: QuantityEvidence.ZERO)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: IllegalArgumentException) { blocked(BaselineBlockedReason.INSUFFICIENT_LOCAL_EVIDENCE, snapshot) }
+        catch (failure: IllegalArgumentException) { blocked(BaselineBlockedReason.INSUFFICIENT_LOCAL_EVIDENCE, snapshot)
+            .copy(blockedDiagnostic = (failure as? BootstrapEligibilityException)?.diagnostic ?: PositionDiagnostic.INVALID_BOOTSTRAP_MANIFEST) }
     }
 
     override suspend fun establishBaseline(selection: BaselineSelection) = database.transaction {
         require(selection.eligible)
         val proposal = requireNotNull(selection.proposal)
         val snapshot = requireNotNull(snapshots.latestComplete())
-        require(snapshot.metadata.snapshotId == selection.snapshot?.metadata?.snapshotId) { "Snapshot changed" }
-        require(policy.freshness(snapshot.metadata.completedAtEpochMillis, now()) == SnapshotFreshness.FRESH)
+        if (snapshot.metadata.snapshotId != selection.snapshot?.metadata?.snapshotId) throw BaselineValidationException(BaselineBlockedReason.SNAPSHOT_CHANGED)
+        if (!coordinator.isCurrentSnapshot(snapshot)) throw BaselineValidationException(BaselineBlockedReason.CONFIGURATION_CHANGED)
+        if (policy.freshness(snapshot.metadata.completedAtEpochMillis, now()) != SnapshotFreshness.FRESH) throw BaselineValidationException(BaselineBlockedReason.SNAPSHOT_NOT_FRESH)
+        if (snapshots.historyCheckpoint().digest != snapshot.metadata.localHistoryDigest) throw BaselineValidationException(BaselineBlockedReason.HISTORY_CHANGED)
+        if (anchors.getActiveAnchor(proposal.symbol, proposal.accountRef) != null) throw BaselineValidationException(BaselineBlockedReason.ACTIVE_CONFLICT)
         // Revalidate on confirm, including account scope, digest, precision, coverage and active conflict.
-        anchors.createAnchor(proposal.copy(createdAtEpochMillis = now()), snapshot.metadata.snapshotId,
+        val at = now()
+        val accepted = if (proposal.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1) {
+            val original = requireNotNull(proposal.bootstrapCut)
+            require(BootstrapEvidenceCodec.digest(original) == proposal.bootstrapCutDigest)
+            val cut = original.copy(acceptedAt = at)
+            proposal.copy(createdAtEpochMillis = at, bootstrapCut = cut, bootstrapCutDigest = BootstrapEvidenceCodec.digest(cut))
+        } else proposal.copy(createdAtEpochMillis = at)
+        anchors.createAnchor(accepted, snapshot.metadata.snapshotId,
             scopeAssurance(snapshot.metadata.accountRef))
         Unit
     }

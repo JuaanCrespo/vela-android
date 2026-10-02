@@ -37,6 +37,7 @@ import com.vela.android.lab.db.room.migrations.MIGRATION_4_5
 import com.vela.android.lab.db.room.migrations.MIGRATION_5_6
 import com.vela.android.lab.db.room.migrations.MIGRATION_6_7
 import com.vela.android.lab.db.room.migrations.MIGRATION_7_8
+import com.vela.android.lab.db.room.migrations.MIGRATION_8_9
 
 /**
  * Phase 1.c Room database: the offline persistence foundation for
@@ -55,7 +56,7 @@ import com.vela.android.lab.db.room.migrations.MIGRATION_7_8
  * `app/schemas/com.vela.android.lab.db.room.VelaDatabase/1.json`.
  */
 @Database(
-    version = 8,
+    version = 9,
     exportSchema = true,
     entities = [
         MarketBar1mEntity::class,
@@ -107,15 +108,8 @@ abstract class VelaDatabase : RoomDatabase() {
                 VelaDatabase::class.java,
                 DATABASE_NAME,
             )
-                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
-                // Phase 2.q: dev-lab database; throwaway Phase 1.e
-                // bars / features / signals / journal rows are
-                // acceptable losses on schema bump. Watchlist + Paper
-                // credentials live in SharedPreferences / Keystore and
-                // survive the rebuild.
-                // Only pre-audit development schemas may still be discarded. Versions 4+
-                // must always migrate explicitly so submit/lifecycle evidence is preserved.
-                .fallbackToDestructiveMigrationFrom(1, 2, 3)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                // Unsupported schemas fail closed; no destructive fallback.
                 .build()
 
         /**

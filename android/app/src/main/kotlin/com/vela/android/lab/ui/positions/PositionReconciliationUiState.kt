@@ -24,6 +24,8 @@ data class PositionReconciliationUiState(
     val dialog: PositionBaselineDialog? = null,
     val diagnosticsExpanded: Boolean = false,
     val error: PositionUiError? = null,
+    val baselineBlockedReason: BaselineBlockedReason? = null,
+    val invalidBootstrapEvidence: Boolean = false,
 ) {
     val busy: Boolean get() = loadingLocal || workingLocal || refreshState == PositionRefreshState.REFRESHING
     val canRefresh: Boolean get() = !busy && dialog == null
@@ -50,6 +52,10 @@ data class PositionRowPresentation(
     val diagnostics: List<String>,
     val provenance: String,
     val anchorId: String?,
+    val coverageMode: PositionCoverageMode? = null,
+    val historicalKnownDelta: String? = null,
+    val postAnchorExactDelta: String? = null,
+    val postAnchorAssurance: CutAssurance? = null,
 ) {
     val explanation: String get() = when (state) {
         PositionReconciliationState.MISMATCH -> "Diferencia de posición sin explicación. Causa: UNKNOWN. Revisar baseline."
@@ -93,6 +99,8 @@ fun positionRows(overview: DurablePositionOverview, now: Long, policy: PositionO
             if (comparable) row.difference?.toString() ?: "NOT COMPARABLE" else "NOT COMPARABLE", currentState,
             row.diagnostics.map { it.name }.sorted() + when { invalid -> listOf("ANCHOR_INVALID"); changed -> listOf("BASELINE_CHANGED_REFRESH_REQUIRED"); else -> emptyList() },
             "broker=${row.brokerQty.provenance}; delta=${row.knownVelaDelta.provenance}; baseline=${row.anchorQty.provenance}; expected=${row.expectedQty.provenance}",
-            row.anchorId)
+            row.anchorId, row.coverageMetadata?.coverageMode,
+            row.coverageMetadata?.let { "${quantityText(it.historicalKnownVelaDelta)} · ${it.historicalKnownVelaDelta.provenance}" },
+            row.coverageMetadata?.let { quantityText(it.postAnchorExactDelta) }, row.coverageMetadata?.postAnchorCoverageAssurance)
     }
 }

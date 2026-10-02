@@ -109,6 +109,7 @@ data class PaperOrderStatusFetchEvidence(
     val httpStatusCode: Int,
     val source: String = SOURCE,
     val method: String = AlpacaPaperOrderStatusEndpoint.METHOD,
+    val exactDecimalEvidence: PaperOrderRawDecimalEvidence? = null,
 ) {
     init {
         require(httpStatusCode in 200..299) { "Paper status HTTP success code is invalid." }
@@ -121,4 +122,9 @@ data class PaperOrderStatusFetchEvidence(
     companion object {
         const val SOURCE: String = "ALPACA_PAPER_ORDER_GET"
     }
+}
+
+/** Original allow-listed response fields; never reconstructed from the display model's floating-point values. */
+class PaperOrderRawDecimalEvidence internal constructor(val fieldsJson: String, val accountRef: String) {
+    override fun toString(): String = "PaperOrderRawDecimalEvidence(REDACTED)"
 }

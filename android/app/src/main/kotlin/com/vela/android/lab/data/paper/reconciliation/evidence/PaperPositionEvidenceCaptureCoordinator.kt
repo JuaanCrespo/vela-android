@@ -23,6 +23,9 @@ class PaperPositionEvidenceCaptureCoordinator(
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val parser: StrictPaperCaptureParser = StrictPaperCaptureParser(),
 ) {
+    suspend fun isCurrentSnapshot(snapshot: StoredBrokerSnapshot): Boolean =
+        configuration.read().let { it.configRef == snapshot.metadata.configRef && it.sessionRef == snapshot.metadata.sessionRef }
+
     suspend fun captureManually(): ManualCaptureResult {
         if (!captureLock.tryLock()) return ManualCaptureResult.Busy
         try {
@@ -31,6 +34,7 @@ class PaperPositionEvidenceCaptureCoordinator(
             val refreshId = newId()
             val snapshotId = newId()
             val session = configuration.read()
+            configuration.clearAccountBinding()
             val localStart = repository.historyCheckpoint()
             val diagnostics = linkedSetOf<CaptureDiagnostic>()
             var accountAt: Long? = null
@@ -76,7 +80,11 @@ class PaperPositionEvidenceCaptureCoordinator(
                 accountCode, positionsCode, received, validated,
                 if (complete) BrokerSnapshotCompleteness.COMPLETE.name else BrokerSnapshotCompleteness.FAILED.name,
                 enumNames(diagnostics), wallTime(), observed, localHistoryDigest = localStart.digest)
-            return try { ManualCaptureResult.Persisted(repository.persist(candidate, if (complete) rows else emptyList())) }
+            return try {
+                val stored = repository.persist(candidate, if (complete) rows else emptyList())
+                if (complete) configuration.rememberAccount(session, requireNotNull(account?.accountRef))
+                ManualCaptureResult.Persisted(stored)
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { ManualCaptureResult.PersistenceFailure }
         } finally { captureLock.unlock() }

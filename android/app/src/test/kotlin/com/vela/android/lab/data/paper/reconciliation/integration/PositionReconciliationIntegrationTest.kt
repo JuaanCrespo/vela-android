@@ -48,10 +48,12 @@ class PositionReconciliationIntegrationTest {
         assertEquals(PositionReconciliationState.MATCH, row.state)
     }
 
-    @Test fun `zero baseline is disabled for absent symbol when history scope is not known`() = runTest {
+    @Test fun `absent symbol can explicitly bootstrap without certifying legacy history scope`() = runTest {
         val rig = PositionIntegrationRig(); rig.histories = listOf(fixture().history)
         val store = rig.store(); store.refreshManually()
-        assertFalse(store.selectBaselineSymbol("AAPL").eligible); assertTrue(rig.dao.anchors.isEmpty())
+        val selection = store.selectBaselineSymbol("AAPL")
+        assertTrue(selection.eligible); assertEquals(PositionCoverageMode.LEGACY_BOOTSTRAP_V1, selection.proposal!!.coverageMode)
+        assertEquals(QuantityEvidence.ZERO, selection.proposal.baselineQty); assertTrue(rig.dao.anchors.isEmpty())
     }
 
     @Test fun `invalidated anchor is not used for expected quantity on next capture`() = runTest {
@@ -108,7 +110,10 @@ class PositionReconciliationIntegrationTest {
         val data = store.loadOffline()
         assertEquals(PositionReconciliationState.UNKNOWN, data.latestReport!!.report.rows.single().state)
         assertTrue(PositionDiagnostic.INCOMPLETE_HISTORY in data.latestReport.report.diagnostics)
-        assertFalse(store.selectBaselineSymbol("SPY").eligible)
+        val selection = store.selectBaselineSymbol("SPY")
+        assertTrue(selection.eligible)
+        assertEquals(PositionCoverageMode.LEGACY_BOOTSTRAP_V1, selection.proposal!!.coverageMode)
+        assertEquals(PreAnchorHistoryAssurance.LEGACY_UNKNOWN, selection.proposal.bootstrapCut!!.preAnchorHistoryAssurance)
         assertTrue(rig.dao.decimalEvidence.isEmpty())
     }
 

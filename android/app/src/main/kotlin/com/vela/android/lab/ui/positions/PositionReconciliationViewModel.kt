@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.vela.android.lab.data.paper.reconciliation.domain.AnchorStatus
 import com.vela.android.lab.data.paper.reconciliation.domain.SnapshotFreshness
 import com.vela.android.lab.data.paper.reconciliation.integration.*
+import com.vela.android.lab.data.paper.reconciliation.evidence.InvalidBootstrapEvidenceException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -102,20 +103,28 @@ class PositionReconciliationViewModel(
 
     private fun localAction(failure: PositionUiError, action: suspend () -> Unit) {
         if (mutableState.value.busy || mutableState.value.dialog != null) return
-        mutableState.update { it.copy(workingLocal = true, error = null) }
+        mutableState.update { it.copy(workingLocal = true, error = null, baselineBlockedReason = null) }
         viewModelScope.launch {
             try { action() }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableState.update { it.copy(error = failure, selectedBaseline = null) } }
+            catch (error: Exception) { mutableState.update { it.copy(error = failure, selectedBaseline = null,
+                baselineBlockedReason = (error as? BaselineValidationException)?.reason) } }
             finally { mutableState.update { it.copy(workingLocal = false) } }
         }
     }
 
     private suspend fun reloadDurable() {
-        val durable = store.loadOffline()
+        val durable = try { store.loadOffline() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            mutableState.update { it.copy(rows = emptyList(), selectedBaseline = null,
+                invalidBootstrapEvidence = failure is InvalidBootstrapEvidenceException) }
+            throw failure
+        }
         val at = now()
         val rows = positionRows(durable, at, policy)
         val freshness = durable.latestComplete?.let { policy.freshness(it.metadata.completedAtEpochMillis, at) } ?: SnapshotFreshness.UNKNOWN
-        mutableState.update { it.copy(durable = durable, rows = rows, freshness = freshness, selectedBaseline = null, error = null) }
+        mutableState.update { it.copy(durable = durable, rows = rows, freshness = freshness, selectedBaseline = null, error = null,
+            baselineBlockedReason = null, invalidBootstrapEvidence = false) }
     }
 }

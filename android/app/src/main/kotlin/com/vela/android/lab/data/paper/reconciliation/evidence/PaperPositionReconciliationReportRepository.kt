@@ -25,7 +25,9 @@ class PaperPositionReconciliationReportRepository(private val database: Position
             snapshots.historyCheckpoint().digest == snapshot.metadata.localHistoryDigest) alignment else CutAssurance.UNKNOWN
         val report = PositionReconciliationEngine().reconcile(LocalPositionExpectationEngine().evaluate(frozen.history, frozen.anchors),
             snapshot.domain(effectiveAlignment), freshness)
-        val metadata = PaperPositionReconciliationReportEntity(reportId, brokerSnapshotId, POSITION_ENGINE_V1, POSITION_POLICY_V1,
+        val bootstrap = referencedAnchors.any { it.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1 }
+        val metadata = PaperPositionReconciliationReportEntity(reportId, brokerSnapshotId,
+            if (bootstrap) POSITION_ENGINE_V2 else POSITION_ENGINE_V1, if (bootstrap) POSITION_POLICY_BOOTSTRAP_V1 else POSITION_POLICY_V1,
             createdAt, input.accountRef, report.summary.matchedCount, report.summary.mismatchedCount,
             report.summary.unanchoredCount, report.summary.unknownCount, enumNames(report.diagnostics), json, evidenceDigest(json), freshness.name, effectiveAlignment.name)
         database.evidence.insertPositionReconciliationReport(metadata)
@@ -34,7 +36,7 @@ class PaperPositionReconciliationReportRepository(private val database: Position
                 row.brokerQty.quantity?.toString(), row.brokerQty.provenance.name, row.knownVelaDelta.quantity?.toString(), row.knownVelaDelta.provenance.name,
                 row.knownDeltaComplete, row.anchorQty.quantity?.toString(), row.anchorQty.provenance.name,
                 row.expectedQty.quantity?.toString(), row.expectedQty.provenance.name, row.difference?.toString(), row.state.name,
-                row.presence.name, enumNames(row.diagnostics), row.anchorId, row.cause?.name))
+                row.presence.name, enumNames(row.diagnostics), row.anchorId, row.cause?.name, row.coverageMetadata?.let(BootstrapEvidenceCodec::encodeCoverage)))
         }
         StoredPositionReport(metadata, report)
     }
@@ -48,7 +50,8 @@ class PaperPositionReconciliationReportRepository(private val database: Position
                     quantity(row.knownVelaDelta, row.knownDeltaProvenance), row.knownDeltaComplete,
                     quantity(row.anchorQty, row.anchorProvenance), quantity(row.expectedQty, row.expectedProvenance),
                     row.difference?.let(::requireCanonicalDecimal), PositionReconciliationState.valueOf(row.state), PositionPresence.valueOf(row.presence),
-                    readEnumNames(row.diagnosticsJson), row.anchorId, row.cause?.let(PositionDifferenceCause::valueOf))
+                    readEnumNames(row.diagnosticsJson), row.anchorId, row.cause?.let(PositionDifferenceCause::valueOf),
+                    row.coverageJson?.let(BootstrapEvidenceCodec::decodeCoverage))
             }
             StoredPositionReport(metadata, PositionReconciliationReport(metadata.brokerSnapshotId, rows,
                 PositionReconciliationSummary(metadata.matchedCount, metadata.mismatchedCount, metadata.unanchoredCount, metadata.unknownCount),
@@ -59,9 +62,11 @@ class PaperPositionReconciliationReportRepository(private val database: Position
     /** Verification only. Never overwrites a result, and refuses incompatible versions. */
     suspend fun verifyReplay(reportId: String): Boolean = database.transaction {
         val stored = requireNotNull(get(reportId))
-        require(stored.metadata.engineVersion == POSITION_ENGINE_V1 && stored.metadata.policyVersion == POSITION_POLICY_V1) { "Incompatible replay version" }
         require(evidenceDigest(stored.metadata.inputsJson) == stored.metadata.inputsDigest) { "Evidence digest mismatch" }
         val inputs = PositionEvidenceCodec.decode(stored.metadata.inputsJson)
+        val bootstrap = inputs.anchors.any { it.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1 }
+        require(stored.metadata.engineVersion == (if (bootstrap) POSITION_ENGINE_V2 else POSITION_ENGINE_V1) &&
+            stored.metadata.policyVersion == (if (bootstrap) POSITION_POLICY_BOOTSTRAP_V1 else POSITION_POLICY_V1)) { "Incompatible replay version" }
         val snapshot = requireNotNull(snapshots.get(stored.metadata.brokerSnapshotId))
         inputs.anchors.forEach { anchor ->
             val durable = requireNotNull(anchors.get(anchor.anchorId)).domain()

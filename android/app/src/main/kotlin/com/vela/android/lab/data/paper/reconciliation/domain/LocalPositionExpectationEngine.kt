@@ -32,6 +32,8 @@ class LocalPositionExpectationEngine(private val deriver: OrderRealizedFillDeriv
         val symbols = (derived.mapNotNull { it.symbol } + anchors.map { it.symbol })
             .filter(::validPositionSymbol).toSortedSet()
         val states = symbols.map { symbol ->
+            val bootstrap = anchors.filter { it.symbol == symbol }.firstOrNull { it.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1 }
+            if (bootstrap != null) return@map BootstrapCoveragePolicy.evaluate(input, bootstrap, anchors.count { it.symbol == symbol })
             val fills = derived.filter { it.symbol == symbol }.sortedWith(
                 compareBy<RealizedOrderFill> { it.identity.orderSequenceId }.thenBy { it.identity.attemptId },
             )

@@ -19,6 +19,47 @@ class PositionReconciliationViewModelTest {
     @AfterEach fun restoreDispatcher() { Dispatchers.resetMain() }
     private fun vm(rig: PositionIntegrationRig) = PositionReconciliationViewModel(rig.store(), now = { rig.now })
 
+    @Test fun `bootstrap confirmation and recreation remain local and disclose mode`() = runTest {
+        val rig = PositionIntegrationRig(); rig.histories = listOf(fixture().history)
+        val model = vm(rig); model.refreshPositions(); val before = rig.requests.toList()
+        model.selectBaselineSymbol("SPY")
+        assertTrue(model.uiState.value.canEstablish)
+        model.requestEstablishBaseline()
+        val dialog = model.uiState.value.dialog as PositionBaselineDialog.Establish
+        assertEquals(PositionCoverageMode.LEGACY_BOOTSTRAP_V1, dialog.selection.proposal!!.coverageMode)
+        model.confirmEstablishBaseline()
+        assertNull(model.uiState.value.error)
+        assertEquals(before, rig.requests)
+        val restored = vm(rig)
+        assertEquals("LEGACY_BOOTSTRAP_V1", restored.uiState.value.durable.anchors.single().metadata.coverageMode)
+        assertEquals(before, rig.requests)
+    }
+
+    @Test fun `bootstrap exposes open order reason and rejects confirmation after evidence changes`() = runTest {
+        val rig = PositionIntegrationRig(); rig.histories = listOf(fixture().history)
+        val model = vm(rig); model.refreshPositions(); model.selectBaselineSymbol("SPY"); model.requestEstablishBaseline()
+        rig.histories += fixture("open", orderSequence = 100, firstObservation = 100, observations = listOf("submitted" to "0")).history
+        model.confirmEstablishBaseline()
+        assertEquals(PositionUiError.ANCHOR_CREATE_FAILED, model.uiState.value.error); assertTrue(rig.dao.anchors.isEmpty())
+        assertEquals(BaselineBlockedReason.HISTORY_CHANGED, model.uiState.value.baselineBlockedReason)
+        model.refreshPositions(); model.selectBaselineSymbol("SPY")
+        assertFalse(model.uiState.value.canEstablish)
+        assertEquals(PositionDiagnostic.BOOTSTRAP_OPEN_OR_UNCERTAIN_ORDER, model.uiState.value.selectedBaseline!!.blockedDiagnostic)
+    }
+
+    @Test fun `invalid durable bootstrap manifest clears comparable rows and exposes explicit error`() = runTest {
+        val rig = PositionIntegrationRig(); rig.histories = listOf(fixture().history)
+        val model = vm(rig); model.refreshPositions(); model.selectBaselineSymbol("SPY")
+        model.requestEstablishBaseline(); model.confirmEstablishBaseline(); model.refreshPositions()
+        assertEquals(PositionReconciliationState.MATCH, model.uiState.value.rows.single().state)
+        val anchor = rig.dao.anchors.values.single()
+        rig.dao.anchors[anchor.anchorId] = anchor.copy(bootstrapCutDigest = "0".repeat(64))
+        model.loadOffline()
+        assertEquals(PositionUiError.LOCAL_READ_FAILED, model.uiState.value.error)
+        assertTrue(model.uiState.value.invalidBootstrapEvidence); assertTrue(model.uiState.value.rows.isEmpty())
+        assertFalse(model.uiState.value.canEstablish)
+    }
+
     @Test fun `failed invalidation leaves durable active anchor and reports sanitized failure`() = runTest {
         val rig = PositionIntegrationRig(); val real = rig.store(); real.refreshManually()
         real.establishBaseline(real.selectBaselineSymbol("SPY"))

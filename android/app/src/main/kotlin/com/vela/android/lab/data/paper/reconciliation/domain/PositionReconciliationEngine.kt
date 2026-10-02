@@ -20,6 +20,8 @@ class PositionReconciliationEngine {
         val symbols = (local.positions.map { it.symbol } + broker.positions.map { it.symbol }).filter(::validPositionSymbol).toSortedSet()
         val rows = symbols.map { symbol ->
             val state = local.positions.singleOrNull { it.symbol == symbol }
+            val bootstrap = state?.anchor?.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1
+            val applicableGlobal = if (bootstrap) global - PositionDiagnostic.INCOMPLETE_HISTORY else global
             val position = broker.positions.singleOrNull { it.symbol == symbol }
             val diagnostics = (global + state?.diagnostics.orEmpty()).toMutableSet()
             val brokerUsable = broker.completeness == BrokerSnapshotCompleteness.COMPLETE && !invalid
@@ -41,14 +43,15 @@ class PositionReconciliationEngine {
                 state.coverage == PositionCoverage.ANCHOR_INVALID)
             if (localBad || anchorBad || anchor == null || state?.coverage != PositionCoverage.ANCHORED) expected = QuantityEvidence.UNKNOWN
             val comparable = expected.exact && observed.exact && state?.integrity == PositionIntegrity.RELIABLE &&
-                state.deltaComplete && !state.hasOpenExposure && accountMatches && aligned && global.isEmpty()
+                (if (bootstrap) state.coverageMetadata?.postAnchorCoverageAssurance == CutAssurance.CONFIRMED else state.deltaComplete) &&
+                !state.hasOpenExposure && accountMatches && aligned && applicableGlobal.isEmpty()
             val result = when {
                 broker.completeness == BrokerSnapshotCompleteness.FAILED -> PositionReconciliationState.BROKER_READ_FAILED
                 localBad -> PositionReconciliationState.INCONSISTENT_LOCAL_HISTORY
                 anchorBad -> PositionReconciliationState.ANCHOR_INVALID
                 !brokerUsable -> PositionReconciliationState.UNKNOWN
                 freshness == SnapshotFreshness.STALE -> PositionReconciliationState.STALE
-                freshness != SnapshotFreshness.FRESH || global.isNotEmpty() -> PositionReconciliationState.UNKNOWN
+                freshness != SnapshotFreshness.FRESH || applicableGlobal.isNotEmpty() -> PositionReconciliationState.UNKNOWN
                 anchor == null -> PositionReconciliationState.UNANCHORED
                 !comparable -> PositionReconciliationState.UNKNOWN
                 observed.quantity == expected.quantity -> PositionReconciliationState.MATCH
@@ -73,6 +76,7 @@ class PositionReconciliationEngine {
                     position != null -> PositionPresence.BROKER_ONLY; else -> PositionPresence.NEITHER },
                 diagnostics.toSet(), anchor?.anchorId,
                 if (result == PositionReconciliationState.MISMATCH) PositionDifferenceCause.UNKNOWN else null,
+                state?.coverageMetadata,
             )
         }
         return PositionReconciliationReport(

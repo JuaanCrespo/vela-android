@@ -3,14 +3,32 @@ package com.vela.android.lab.data.paper.reconciliation.evidence
 import com.vela.android.lab.data.paper.reconciliation.domain.*
 import com.vela.android.lab.db.room.entities.*
 
+class InvalidBootstrapEvidenceException : IllegalArgumentException("INVALID_BOOTSTRAP_MANIFEST")
+
 data class StoredPositionAnchor(val metadata: PaperPositionAnchorEntity, val cursors: List<PaperPositionAnchorCursorEntity>) {
-    fun domain(): PositionAnchor = PositionAnchor(metadata.anchorId, metadata.symbol, metadata.accountRef,
+    fun domain(): PositionAnchor = try { decodeDomain() } catch (failure: RuntimeException) {
+        if (metadata.coverageMode != PositionCoverageMode.EXACT_CURSORS_V1.name || metadata.bootstrapCutJson != null || metadata.bootstrapCutDigest != null)
+            throw InvalidBootstrapEvidenceException()
+        throw failure
+    }
+
+    private fun decodeDomain(): PositionAnchor = PositionAnchor(metadata.anchorId, metadata.symbol, metadata.accountRef,
         QuantityEvidence(requireCanonicalDecimal(metadata.baselineQty), DecimalProvenance.valueOf(metadata.baselineProvenance)),
         AnchorCoverageCut(metadata.orderSequenceInclusive, metadata.lifecycleSequenceInclusive, CutAssurance.valueOf(metadata.cutAssurance)),
         cursors.map { AnchorOrderCursor(PositionOrderIdentity(it.attemptId, it.orderId, it.clientOrderId, it.orderSequenceId, it.symbol, it.side),
             QuantityEvidence(requireCanonicalDecimal(it.includedFilledQty), DecimalProvenance.valueOf(it.provenance)), it.observationSequence, it.payloadFingerprint) },
         AnchorStatus.valueOf(metadata.status), metadata.createdAtEpochMillis, metadata.invalidatedAtEpochMillis,
-        metadata.invalidationReason?.let(AnchorInvalidationReason::valueOf))
+        metadata.invalidationReason?.let(AnchorInvalidationReason::valueOf), PositionCoverageMode.valueOf(metadata.coverageMode),
+        metadata.bootstrapCutJson?.let { BootstrapEvidenceCodec.decode(it, requireNotNull(metadata.bootstrapCutDigest)) }, metadata.bootstrapCutDigest)
+        .also { anchor ->
+            require((anchor.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1) == (anchor.bootstrapCut != null))
+            require((anchor.bootstrapCut != null) == (anchor.bootstrapCutDigest != null))
+            anchor.bootstrapCut?.let {
+                require(it.brokerSnapshotId == metadata.brokerSnapshotId && it.accountRef == metadata.accountRef && it.symbol == metadata.symbol &&
+                    it.baselineQty == anchor.baselineQty && it.orderHighWater == metadata.orderSequenceInclusive &&
+                    it.lifecycleHighWater == metadata.lifecycleSequenceInclusive && it.acceptedAt == metadata.createdAtEpochMillis)
+            }
+        }
 }
 
 class PaperPositionAnchorRepository(private val database: PositionEvidenceDatabase) {
@@ -46,6 +64,42 @@ class PaperPositionAnchorRepository(private val database: PositionEvidenceDataba
         anchor
     }
 
+    /** Separate opt-in policy; never changes the meaning of prepareAnchor / exact cursors. */
+    suspend fun prepareBootstrapAnchor(anchorId: String, symbol: String, brokerSnapshotId: String, at: Long): PositionAnchor = database.transaction {
+        val snapshot = requireNotNull(snapshots.get(brokerSnapshotId))
+        require(database.evidence.activeAnchor(symbol, requireNotNull(snapshot.metadata.accountRef)) == null) { "Active anchor conflict" }
+        val cut = bootstrapManifest(snapshot, symbol, at)
+        val proposal = PositionAnchor(anchorId, symbol, cut.accountRef, cut.baselineQty,
+            AnchorCoverageCut(cut.orderHighWater, cut.lifecycleHighWater, CutAssurance.CONFIRMED), emptyList(), AnchorStatus.ACTIVE, at,
+            coverageMode = PositionCoverageMode.LEGACY_BOOTSTRAP_V1, bootstrapCut = cut, bootstrapCutDigest = BootstrapEvidenceCodec.digest(cut))
+        validateCreation(proposal, brokerSnapshotId, CutAssurance.UNKNOWN)
+        proposal
+    }
+
+    private suspend fun bootstrapManifest(snapshot: StoredBrokerSnapshot, symbol: String, at: Long): BootstrapCutManifest {
+        val meta = snapshot.metadata
+        require(snapshot.anchorEligible && validEvidenceSymbol(symbol) && at >= meta.completedAtEpochMillis && at - meta.completedAtEpochMillis <= 60_000L)
+        require(meta.positionsReceivedCount == snapshot.positions.size && meta.positionsValidatedCount == snapshot.positions.size)
+        require(meta.source == POSITION_CAPTURE_SOURCE && meta.parserVersion == POSITION_CAPTURE_PARSER_V1 &&
+            meta.accountHttpStatus == 200 && meta.positionsHttpStatus == 200 && readEnumNames<CaptureDiagnostic>(meta.diagnosticsJson).isEmpty())
+        require(snapshot.positions.map { it.symbol }.distinct().size == snapshot.positions.size)
+        snapshot.positions.forEach { row ->
+            require(row.decimalProvenance == DecimalProvenance.EXACT_DECIMAL.name && DecimalQuantity.parse(row.qtyRawDecimal) == requireCanonicalDecimal(row.qtyCanonicalDecimal))
+            require((row.side == BrokerPositionSide.LONG.name && DecimalQuantity.parse(row.qtyRawDecimal) > DecimalQuantity.ZERO) ||
+                (row.side == BrokerPositionSide.SHORT.name && DecimalQuantity.parse(row.qtyRawDecimal) < DecimalQuantity.ZERO))
+        }
+        val checkpoint = snapshots.historyCheckpoint()
+        require(checkpoint.digest == meta.localHistoryDigest && checkpoint.orderSequence == meta.orderSequenceInclusive && checkpoint.lifecycleSequence == meta.lifecycleSequenceInclusive)
+        val histories = database.fullCanonicalHistory()
+        val input = history.read(meta.accountRef, CutAssurance.UNKNOWN)
+        val inventory = BootstrapCoveragePolicy.inventory(histories, symbol, input.decimalEvidence)
+        val auditHighWater = histories.flatMap { listOfNotNull(it.orderSequenceId, it.auditStartRowId, it.auditResultRowId) }.maxOrNull() ?: 0L
+        return BootstrapCutManifest(brokerSnapshotId = meta.snapshotId, brokerSequence = meta.sequence, accountRef = requireNotNull(meta.accountRef),
+            symbol = symbol, baselineQty = snapshot.domain().positions.singleOrNull { it.symbol == symbol }?.quantity ?: QuantityEvidence.ZERO,
+            localHistoryDigest = meta.localHistoryDigest, submitAuditHighWater = auditHighWater, lifecycleHighWater = meta.lifecycleSequenceInclusive,
+            orderHighWater = meta.orderSequenceInclusive, capturedAt = meta.completedAtEpochMillis, acceptedAt = at, inventory = inventory)
+    }
+
     private suspend fun validateCreation(anchor: PositionAnchor, brokerSnapshotId: String, scopeAssurance: CutAssurance): String {
         val snapshot = requireNotNull(snapshots.get(brokerSnapshotId))
         require(snapshot.anchorEligible && snapshot.metadata.accountRef == anchor.accountRef && validEvidenceSymbol(anchor.symbol))
@@ -55,6 +109,12 @@ class PaperPositionAnchorRepository(private val database: PositionEvidenceDataba
         require(anchor.status == AnchorStatus.ACTIVE && anchor.baselineQty.exact && anchor.createdAtEpochMillis >= snapshot.metadata.completedAtEpochMillis)
         val baseline = snapshot.positions.singleOrNull { it.symbol == anchor.symbol }?.qtyCanonicalDecimal ?: "0"
         require(anchor.baselineQty.quantity == requireCanonicalDecimal(baseline))
+        if (anchor.coverageMode == PositionCoverageMode.LEGACY_BOOTSTRAP_V1) {
+            val manifest = requireNotNull(anchor.bootstrapCut)
+            require(BootstrapEvidenceCodec.digest(manifest) == anchor.bootstrapCutDigest)
+            require(bootstrapManifest(snapshot, anchor.symbol, anchor.createdAtEpochMillis) == manifest) { "Bootstrap cut changed" }
+            require(anchor.cursors.isEmpty()) { "Bootstrap does not invent historical quantity cursors" }
+        } else require(anchor.bootstrapCut == null && anchor.bootstrapCutDigest == null)
         val input = history.read(anchor.accountRef, scopeAssurance)
         require(LocalPositionExpectationEngine().evaluate(input, listOf(anchor)).positions.single { it.symbol == anchor.symbol }.coverage == PositionCoverage.ANCHORED) {
             "Anchor evidence or coverage is not sufficient"
@@ -66,7 +126,8 @@ class PaperPositionAnchorRepository(private val database: PositionEvidenceDataba
         val baseline = validateCreation(anchor, brokerSnapshotId, scopeAssurance)
         val entity = PaperPositionAnchorEntity(anchor.anchorId, anchor.symbol, anchor.accountRef, brokerSnapshotId,
             baseline, anchor.baselineQty.provenance.name, anchor.cut.orderSequenceInclusive, anchor.cut.lifecycleSequenceInclusive,
-            anchor.cut.assurance.name, AnchorStatus.ACTIVE.name, "${anchor.accountRef}|${anchor.symbol}", anchor.createdAtEpochMillis, null, null, 1)
+            anchor.cut.assurance.name, AnchorStatus.ACTIVE.name, "${anchor.accountRef}|${anchor.symbol}", anchor.createdAtEpochMillis, null, null, 1,
+            anchor.coverageMode.name, anchor.bootstrapCut?.let(BootstrapEvidenceCodec::encode), anchor.bootstrapCutDigest)
         database.evidence.insertPositionAnchor(entity)
         val cursors = anchor.cursors.map { cursor ->
             PaperPositionAnchorCursorEntity(anchor.anchorId, cursor.identity.attemptId, cursor.identity.orderId,

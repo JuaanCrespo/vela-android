@@ -66,3 +66,8 @@ internal fun sumEvidence(values: List<QuantityEvidence>): QuantityEvidence {
         if (values.all { it.exact }) DecimalProvenance.EXACT_DECIMAL else DecimalProvenance.LEGACY_DOUBLE_DERIVED,
     )
 }
+
+/** Checks only compatibility with lossy storage; the original exact source remains authoritative. */
+internal fun legacyProjectionMatches(exact: QuantityEvidence, legacy: QuantityEvidence): Boolean =
+    exact.exact && legacy.provenance == DecimalProvenance.LEGACY_DOUBLE_DERIVED &&
+        QuantityEvidence.legacy(exact.quantity?.toString()?.toDouble()) == legacy

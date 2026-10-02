@@ -53,6 +53,8 @@ import com.vela.android.lab.data.paper.reconciliation.evidence.PaperBrokerPositi
 import com.vela.android.lab.data.paper.reconciliation.evidence.PaperCaptureConfiguration
 import com.vela.android.lab.data.paper.reconciliation.evidence.PaperPositionEvidenceCaptureCoordinator
 import com.vela.android.lab.data.paper.reconciliation.evidence.PaperPositionEvidenceHttpTransport
+import com.vela.android.lab.data.paper.reconciliation.evidence.FutureLifecycleDecimalEvidenceWriter
+import com.vela.android.lab.data.paper.reconciliation.evidence.captureFutureOrderDecimals
 import com.vela.android.lab.data.paper.reconciliation.integration.CanonicalPositionReconciliationStore
 
 /**
@@ -71,12 +73,13 @@ import com.vela.android.lab.data.paper.reconciliation.integration.CanonicalPosit
  *  - The Phase 1.e offline dashboard never touches any of these.
  */
 class VelaLabApplication : Application() {
+    private val paperCaptureConfiguration by lazy { PaperCaptureConfiguration(alpacaCredentialsProvider) }
 
     /** Inert graph. Only the positions screen's explicit human refresh can capture. */
     val positionReconciliationStore by lazy {
         val evidence = RoomPositionEvidenceDatabase(database)
         CanonicalPositionReconciliationStore(evidence, PaperPositionEvidenceCaptureCoordinator(
-            PaperCaptureConfiguration(alpacaCredentialsProvider), PaperPositionEvidenceHttpTransport(),
+            paperCaptureConfiguration, PaperPositionEvidenceHttpTransport(),
             PaperBrokerPositionSnapshotRepository(evidence),
         ))
     }
@@ -271,6 +274,8 @@ class VelaLabApplication : Application() {
         AlpacaPaperOrderStatusReadOnlyClient(
             credentialsProvider = alpacaCredentialsProvider,
             httpClient = alpacaPaperOrderStatusHttpClient,
+            accountRefProvider = paperCaptureConfiguration::accountRefFor,
+            rawEvidenceFactory = ::captureFutureOrderDecimals,
         )
     }
 
@@ -313,6 +318,7 @@ class VelaLabApplication : Application() {
         PaperOrderStatusTrackerRepository(
             auditRepository = paperOrderSubmitAuditRepository,
             reconciliationDao = database.paperOrderReconciliationDao(),
+            evidenceWriter = FutureLifecycleDecimalEvidenceWriter(RoomPositionEvidenceDatabase(database), database.paperOrderReconciliationDao()),
         )
     }
 

@@ -216,9 +216,14 @@ interface PaperOrderTrackingSource {
  * Persistent read-only reconciliation. It enumerates all attempts and never selects by time.
  * Lifecycle evidence is committed before it can unlock foreground state.
  */
+fun interface PaperLifecycleEvidenceWriter {
+    suspend fun append(observation: PaperOrderLifecycleObservationEntity, updated: PaperOrderReconciliationEntity, evidence: PaperOrderStatusFetchEvidence)
+}
+
 class PaperOrderStatusTrackerRepository(
     private val auditRepository: PaperOrderSubmitAuditRepository,
     private val reconciliationDao: PaperOrderReconciliationDao,
+    private val evidenceWriter: PaperLifecycleEvidenceWriter? = null,
 ) : PaperOrderTrackingSource {
     private val mutex = Mutex()
 
@@ -299,7 +304,8 @@ class PaperOrderStatusTrackerRepository(
             lifecycleHttpStatusCode = evidence.httpStatusCode,
         )
         try {
-            reconciliationDao.appendLifecycleObservation(observation, updated)
+            if (evidenceWriter == null) reconciliationDao.appendLifecycleObservation(observation, updated)
+            else evidenceWriter.append(observation, updated, evidence)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

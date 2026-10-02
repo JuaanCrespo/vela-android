@@ -1,6 +1,7 @@
 package com.vela.android.lab.data.paper.status
 
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentialsProvider
+import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentials
 
 /**
  * Credential-safe read-only lifecycle client for one previously submitted Paper order.
@@ -10,6 +11,8 @@ class AlpacaPaperOrderStatusReadOnlyClient(
     private val credentialsProvider: AlpacaCredentialsProvider,
     private val httpClient: AlpacaPaperOrderStatusHttpClient,
     private val parser: PaperOrderStatusJsonParser = PaperOrderStatusJsonParser(),
+    private val accountRefProvider: suspend (AlpacaCredentials) -> String? = { null },
+    private val rawEvidenceFactory: (String, String) -> PaperOrderRawDecimalEvidence? = { _, _ -> null },
 ) {
 
     sealed interface FetchResult {
@@ -40,19 +43,24 @@ class AlpacaPaperOrderStatusReadOnlyClient(
             return FetchResult.InvalidOrderId
         }
         val credentials = credentialsProvider.read() ?: return FetchResult.AuthMissing
+        val accountRef = accountRefProvider(credentials)
         return when (val response = httpClient.executeGet(
             url = url,
             keyId = credentials.keyId,
             secret = credentials.secret,
         )) {
-            is PaperOrderStatusHttpResult.Success -> when (
+            is PaperOrderStatusHttpResult.Success -> {
+                // Capture original decimal strings before the legacy display parser performs any conversion.
+                val exact = if (accountRef != null && accountRefProvider(credentials) == accountRef)
+                    rawEvidenceFactory(response.body, accountRef) else null
+                when (
                 val parsed = parser.parse(response.body, target)
             ) {
                 is PaperOrderStatusJsonParser.ParseResult.Ok -> {
                     if (parsed.value.matches(target)) {
                         FetchResult.Ok(
                             value = parsed.value,
-                            evidence = PaperOrderStatusFetchEvidence(response.statusCode),
+                            evidence = PaperOrderStatusFetchEvidence(response.statusCode, exactDecimalEvidence = exact),
                         )
                     } else {
                         FetchResult.ResponseIdentityMismatch
@@ -62,6 +70,7 @@ class AlpacaPaperOrderStatusReadOnlyClient(
                     FetchResult.ParseError(parsed.safeMessage)
                 PaperOrderStatusJsonParser.ParseResult.IdentityMismatch ->
                     FetchResult.ResponseIdentityMismatch
+                }
             }
             is PaperOrderStatusHttpResult.HttpError ->
                 FetchResult.HttpError(response.statusCode)
