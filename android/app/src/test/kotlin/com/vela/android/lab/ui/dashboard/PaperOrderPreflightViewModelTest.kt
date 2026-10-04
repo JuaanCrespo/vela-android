@@ -7,6 +7,7 @@ import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentialsProvider
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsStore
 import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
 import com.vela.android.lab.data.market.tick.MarketTick
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
 import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import com.vela.android.lab.data.paper.AlpacaHttpClient
 import com.vela.android.lab.data.paper.AlpacaPaperReadOnlyClient
@@ -26,7 +27,6 @@ import com.vela.android.lab.data.paper.preflight.PreflightStatus
 import com.vela.android.lab.data.paper.submit.PaperOrderSubmitError
 import com.vela.android.lab.data.paper.status.PaperOrderReconciliationSnapshot
 import com.vela.android.lab.data.paper.status.PaperOrderReconciliationVerdict
-import com.vela.android.lab.data.repository.MarketDataRepository
 import com.vela.android.lab.data.repository.SignalRepository
 import com.vela.android.lab.data.watchlist.InMemoryWatchlistStore
 import com.vela.android.lab.data.watchlist.WatchlistRepository
@@ -106,7 +106,6 @@ class PaperOrderPreflightViewModelTest {
             credentialsProvider = AlpacaCredentialsProvider { store.load() },
             httpClient = httpClient,
         )
-        val marketDataRepository = MarketDataRepository(marketDao)
         val tickBuffer = MarketTickBuffer()
         if (includeLiveQuote) {
             val receivedAt = nowMillis - liveQuoteAgeMillis
@@ -118,6 +117,7 @@ class PaperOrderPreflightViewModelTest {
                     marketTimestampMillis = receivedAt - 100L,
                     receivedAtMillis = receivedAt,
                     source = "alpaca-iex-stream",
+                    provenance = MarketDataProvenance.ALPACA_IEX_REAL_TIME,
                 ),
             )
         }
@@ -126,13 +126,11 @@ class PaperOrderPreflightViewModelTest {
             client = client,
             credentialsStore = store,
             watchlistRepository = WatchlistRepository(InMemoryWatchlistStore(watchlist)),
-            marketDataRepository = marketDataRepository,
             signalRepository = SignalRepository(signalDao),
             appState = AppState(),
             auditRepository = auditDao?.let(::PaperOrderDryRunAuditRepository),
             priceSnapshotProvider = MarketPriceSnapshotProvider(
                 tickBuffer = tickBuffer,
-                marketDataRepository = marketDataRepository,
                 clock = { Instant.ofEpochMilli(nowMillis) },
             ),
             payloadPreviewRepository = previewDao?.let(::PaperOrderPayloadPreviewRepository),

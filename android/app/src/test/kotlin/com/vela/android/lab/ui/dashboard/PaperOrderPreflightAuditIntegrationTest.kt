@@ -2,8 +2,12 @@
 
 package com.vela.android.lab.ui.dashboard
 
+import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentials
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentialsProvider
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
+import com.vela.android.lab.data.market.tick.MarketTick
+import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsStore
 import com.vela.android.lab.data.paper.AlpacaHttpClient
 import com.vela.android.lab.data.paper.AlpacaPaperReadOnlyClient
@@ -12,7 +16,6 @@ import com.vela.android.lab.data.paper.HttpResult
 import com.vela.android.lab.data.paper.preflight.OrderSide
 import com.vela.android.lab.data.paper.preflight.PaperOrderDryRunAuditRepository
 import com.vela.android.lab.data.paper.preflight.PaperOrderPreflightEngine
-import com.vela.android.lab.data.repository.MarketDataRepository
 import com.vela.android.lab.data.repository.SignalRepository
 import com.vela.android.lab.data.watchlist.InMemoryWatchlistStore
 import com.vela.android.lab.data.watchlist.WatchlistRepository
@@ -90,11 +93,27 @@ class PaperOrderPreflightAuditIntegrationTest {
             ),
             credentialsStore = store,
             watchlistRepository = WatchlistRepository(InMemoryWatchlistStore(setOf("SPY"))),
-            marketDataRepository = MarketDataRepository(marketDao),
             signalRepository = SignalRepository(signalDao),
             appState = AppState(),
             auditRepository = PaperOrderDryRunAuditRepository(auditDao),
             onAuditSaved = null,
+            // A real-feed IEX quote, stamped at wall-clock now, so the execution reference is trusted.
+            priceSnapshotProvider = MarketPriceSnapshotProvider(
+                tickBuffer = MarketTickBuffer().also { buffer ->
+                    val nowMillis = System.currentTimeMillis()
+                    buffer.pushQuote(
+                        MarketTick(
+                            symbol = "SPY",
+                            bidPrice = 519.90,
+                            askPrice = 520.10,
+                            marketTimestampMillis = nowMillis,
+                            receivedAtMillis = nowMillis,
+                            source = "alpaca-iex-stream",
+                            provenance = MarketDataProvenance.ALPACA_IEX_REAL_TIME,
+                        ),
+                    )
+                },
+            ),
         )
     }
 

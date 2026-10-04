@@ -2,7 +2,7 @@ package com.vela.android.lab.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
 import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsStore
 import com.vela.android.lab.data.paper.AlpacaPaperReadOnlyClient
@@ -69,7 +69,7 @@ class PaperManualSubmitViewModel(
     private var preflight: PaperOrderPreflightResult? = null
     private var preview: PaperOrderPayloadPreview? = null
     private var disabledReadiness: PaperExecutionReadinessSnapshot? = null
-    private var priceSnapshot: MarketPriceSnapshot? = null
+    private var executionReference: ExecutionReferencePrice? = null
     private var account: PaperAccountSnapshot? = null
     private var accountRefreshedAt: Long? = null
     private var clockSnapshot: PaperClockSnapshot? = null
@@ -99,7 +99,7 @@ class PaperManualSubmitViewModel(
         this.preflight = preflight
         this.preview = preview
         this.disabledReadiness = readiness
-        priceSnapshot = null
+        executionReference = null
         account = null
         accountRefreshedAt = null
         clockSnapshot = null
@@ -194,7 +194,7 @@ class PaperManualSubmitViewModel(
             return
         }
         val now = clock().toEpochMilli()
-        val finalPriceEvaluation = gate.evaluateFinalPrice(currentPreview, priceSnapshot, now)
+        val finalPriceEvaluation = gate.evaluateFinalPrice(currentPreview, executionReference, now)
         _uiState.update { it.withFinalPriceEvaluation(finalPriceEvaluation) }
         if (!finalPriceEvaluation.allowed) {
             tokenStore.invalidate()
@@ -264,7 +264,7 @@ class PaperManualSubmitViewModel(
                 (clockResult as? AlpacaPaperReadOnlyClient.FetchResult.Ok<PaperClockSnapshot>)
                     ?.value
             clockRefreshedAt = if (clockSnapshot != null) now else null
-            priceSnapshot = priceSnapshotProvider.snapshotFor(currentPreview.symbol)
+            executionReference = priceSnapshotProvider.executionReferenceFor(currentPreview.symbol)
             reviewQueueMatch = previewRepository.byPreviewId(currentPreview.previewId)
                 ?.let { row ->
                     row.previewId == currentPreview.previewId &&
@@ -580,7 +580,7 @@ class PaperManualSubmitViewModel(
         preflight = null
         preview = null
         disabledReadiness = null
-        priceSnapshot = null
+        executionReference = null
         account = null
         accountRefreshedAt = null
         clockSnapshot = null
@@ -652,7 +652,7 @@ class PaperManualSubmitViewModel(
         val decision = gate.evaluate(gateInput(nowEpochMillis))
         val finalPriceEvaluation = gate.evaluateFinalPrice(
             preview = preview,
-            finalPrice = priceSnapshot,
+            finalPrice = executionReference,
             nowEpochMillis = nowEpochMillis,
         )
         when (decision) {
@@ -685,7 +685,7 @@ class PaperManualSubmitViewModel(
         accountRefreshedAtEpochMillis = accountRefreshedAt,
         clockRefreshedAtEpochMillis = clockRefreshedAt,
         marketOpen = clockSnapshot?.isOpen,
-        priceSnapshot = priceSnapshot,
+        executionReference = executionReference,
         preflight = preflight,
         warningAccepted = _uiState.value.warningAccepted,
         disabledReadinessStatus = disabledReadiness?.status,

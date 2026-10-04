@@ -8,6 +8,7 @@ import com.vela.android.lab.data.market.source.MarketDataError
 import com.vela.android.lab.data.market.source.MarketDataSource
 import com.vela.android.lab.data.market.source.StreamHealth
 import com.vela.android.lab.data.market.source.StreamHealthTracker
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
 import com.vela.android.lab.data.market.tick.MarketTick
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
@@ -62,6 +63,25 @@ class AlpacaStockMarketDataClient(
 
     init {
         AlpacaStreamEndpoint.requireSafeMarketDataEndpoint(endpoint)
+    }
+
+    /**
+     * Provenance and stream label are derived from the exact endpoint this client connected to
+     * (3.a.1-C), by equality with the canonical constants. There is no substring test and no
+     * fallback to a synthetic class. The endpoint guard accepts the test stream as well, so a
+     * FAKEPACA connection is reported as synthetic. Any other value is UNKNOWN, which is never
+     * execution-eligible.
+     */
+    private val provenance: MarketDataProvenance = when (endpoint) {
+        AlpacaStreamEndpoint.IEX_STREAM_URL -> MarketDataProvenance.ALPACA_IEX_REAL_TIME
+        AlpacaStreamEndpoint.TEST_STREAM_URL -> MarketDataProvenance.ALPACA_TEST_SYNTHETIC
+        else -> MarketDataProvenance.UNKNOWN
+    }
+
+    private val streamLabel: String = when (provenance) {
+        MarketDataProvenance.ALPACA_IEX_REAL_TIME -> "alpaca-iex-stream"
+        MarketDataProvenance.ALPACA_TEST_SYNTHETIC -> "alpaca-test-stream"
+        else -> "alpaca-unknown-stream"
     }
 
     override val source: MarketDataSource = MarketDataSource.ALPACA_STOCK_IEX
@@ -230,7 +250,7 @@ class AlpacaStockMarketDataClient(
             price = bar.close,
             change = bar.close - bar.open,
             timestamp = bar.timestamp,
-            source = "alpaca-iex-stream",
+            source = streamLabel,
             open = bar.open,
             high = bar.high,
             low = bar.low,
@@ -260,7 +280,8 @@ class AlpacaStockMarketDataClient(
             askPrice = quote.askPrice,
             marketTimestampMillis = quote.timestamp.toEpochMilli(),
             receivedAtMillis = clock().toEpochMilli(),
-            source = "alpaca-iex-stream",
+            source = streamLabel,
+            provenance = provenance,
         )
         _quotes.tryEmit(tick)
     }

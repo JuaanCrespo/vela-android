@@ -6,6 +6,8 @@ import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentials
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentialsProvider
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsStore
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
+import com.vela.android.lab.data.market.tick.MarketTick
 import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import com.vela.android.lab.data.paper.AlpacaHttpClient
 import com.vela.android.lab.data.paper.AlpacaPaperReadOnlyClient
@@ -46,10 +48,7 @@ import com.vela.android.lab.data.paper.submit.submitTestPreflight
 import com.vela.android.lab.data.paper.submit.submitTestPreview
 import com.vela.android.lab.data.paper.submit.submitTestRequest
 import com.vela.android.lab.data.paper.submit.submitTestReadiness
-import com.vela.android.lab.data.repository.MarketDataRepository
-import com.vela.android.lab.db.room.dao.MarketBarDao
 import com.vela.android.lab.db.room.dao.PaperOrderReconciliationDao
-import com.vela.android.lab.db.room.entities.MarketBar1mEntity
 import com.vela.android.lab.db.room.entities.PaperOrderLifecycleObservationEntity
 import com.vela.android.lab.db.room.entities.PaperOrderReconciliationEntity
 import com.vela.android.lab.state.AppState
@@ -964,26 +963,25 @@ class PaperManualSubmitViewModelTest {
             credentialsProvider = AlpacaCredentialsProvider { store.load() },
             httpClient = readHttp,
         )
-        val marketDao = SubmitVmMarketBarDao().apply {
-            runBlocking {
-                insert(
-                    MarketBar1mEntity(
-                        symbol = "SPY",
-                        bucketStartEpochMillis = 9_000L,
-                        open = finalPriceUsd,
-                        high = finalPriceUsd,
-                        low = finalPriceUsd,
-                        close = finalPriceUsd,
-                        updateCount = 1,
-                        syntheticVolume = 1.0,
-                        lastUpdateTimeEpochMillis = null,
-                    ),
-                )
-            }
+        // 3.a.1-C: the execution reference is a real-feed IEX quote, stamped with the test clock.
+        // A persisted bar no longer informs execution, so none is seeded here.
+        val tickBuffer = MarketTickBuffer().also { buffer ->
+            // Quoted one second before the test clock, the same 1 s age the old Room close had.
+            val quotedAt = clockMillis() - 1_000L
+            buffer.pushQuote(
+                MarketTick(
+                    symbol = "SPY",
+                    bidPrice = finalPriceUsd,
+                    askPrice = finalPriceUsd,
+                    marketTimestampMillis = quotedAt,
+                    receivedAtMillis = quotedAt,
+                    source = "alpaca-iex-stream",
+                    provenance = MarketDataProvenance.ALPACA_IEX_REAL_TIME,
+                ),
+            )
         }
         val priceProvider = MarketPriceSnapshotProvider(
-            tickBuffer = MarketTickBuffer(),
-            marketDataRepository = MarketDataRepository(marketDao),
+            tickBuffer = tickBuffer,
             clock = { Instant.ofEpochMilli(clockMillis()) },
         )
         val previewRepository = PaperOrderPayloadPreviewRepository(PreviewQueueFakeDao())
@@ -1036,7 +1034,7 @@ class PaperManualSubmitViewModelTest {
                 clock = { Instant.ofEpochMilli(clockMillis()) },
             ),
             auditRepository = auditRepository,
-            finalPriceSnapshotProvider = priceProvider::snapshotFor,
+            executionReferenceProvider = priceProvider::executionReferenceFor,
             clock = { Instant.ofEpochMilli(clockMillis()) },
         )
         val vm = PaperManualSubmitViewModel(
@@ -1402,24 +1400,4 @@ private class SubmitVmReadHttpClient : AlpacaHttpClient {
         }
         return HttpResult.Success(200, body)
     }
-}
-
-private class SubmitVmMarketBarDao : MarketBarDao {
-    private val rows = mutableListOf<MarketBar1mEntity>()
-    private var nextId = 1L
-    override suspend fun insert(bar: MarketBar1mEntity): Long {
-        val stored = if (bar.id == 0L) bar.copy(id = nextId++) else bar
-        rows += stored
-        return stored.id
-    }
-    override suspend fun insertAll(bars: List<MarketBar1mEntity>): List<Long> = bars.map { insert(it) }
-    override suspend fun bySymbol(symbol: String): List<MarketBar1mEntity> =
-        rows.filter { it.symbol == symbol }
-    override suspend fun recent(symbol: String, limit: Int): List<MarketBar1mEntity> =
-        rows.filter { it.symbol == symbol }
-            .sortedByDescending { it.bucketStartEpochMillis }.take(limit)
-    override suspend fun countBySymbol(symbol: String): Int = rows.count { it.symbol == symbol }
-    override suspend fun countAll(): Int = rows.size
-    override suspend fun deleteBySymbol(symbol: String) { rows.removeAll { it.symbol == symbol } }
-    override suspend fun clear() { rows.clear() }
 }

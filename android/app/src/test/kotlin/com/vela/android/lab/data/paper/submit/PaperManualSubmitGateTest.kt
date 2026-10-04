@@ -1,8 +1,9 @@
 package com.vela.android.lab.data.paper.submit
 
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
+import com.vela.android.lab.data.market.price.ExecutionReferencePriceEvaluator
+import com.vela.android.lab.data.market.price.LiveQuoteObservation
 import com.vela.android.lab.data.market.price.MarketPriceSource
-import com.vela.android.lab.data.market.price.PriceFreshness
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
 import com.vela.android.lab.data.paper.preflight.PreflightStatus
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -40,16 +41,36 @@ class PaperManualSubmitGateTest {
                 submitTestGateInput().copy(clockRefreshedAtEpochMillis = null),
             PaperOrderSubmitError.MARKET_CLOSED to
                 submitTestGateInput().copy(marketOpen = false),
-            PaperOrderSubmitError.PRICE_NOT_FRESH to
-                submitTestGateInput().copy(priceSnapshot = submitTestPrice(PriceFreshness.STALE)),
+            // Trusted when reviewed (1 s old), then re-evaluated 9.001 s later at submit.
             PaperOrderSubmitError.PRICE_NOT_FRESH to
                 submitTestGateInput().copy(
-                    priceSnapshot = MarketPriceSnapshot.missing("SPY", "missing"),
+                    executionReference = submitTestPrice(ageMillis = 1_000L),
+                    nowEpochMillis = SUBMIT_TEST_NOW + 9_001L,
+                ),
+            PaperOrderSubmitError.NO_TRUSTED_EXECUTION_PRICE to
+                submitTestGateInput().copy(executionReference = null),
+            PaperOrderSubmitError.NO_TRUSTED_EXECUTION_PRICE to
+                submitTestGateInput().copy(
+                    executionReference = ExecutionReferencePriceEvaluator().evaluate(
+                        symbol = "SPY",
+                        observation = LiveQuoteObservation(
+                            bid = 500.0,
+                            ask = 500.0,
+                            provenance = MarketDataProvenance.ALPACA_TEST_SYNTHETIC,
+                            eventTimeEpochMillis = SUBMIT_TEST_NOW - 1_000L,
+                            receivedAtEpochMillis = SUBMIT_TEST_NOW - 1_000L,
+                        ),
+                        nowEpochMillis = SUBMIT_TEST_NOW,
+                    ),
                 ),
             PaperOrderSubmitError.PRICE_NOT_FRESH to
-                submitTestGateInput().copy(priceSnapshot = submitTestPrice(symbol = "QQQ")),
+                submitTestGateInput().copy(executionReference = submitTestPrice(symbol = "QQQ")),
+            PaperOrderSubmitError.PRICE_NOT_FRESH to
+                submitTestGateInput().copy(
+                    preview = submitTestPreview(priceSource = MarketPriceSource.ROOM_BAR_CLOSE),
+                ),
             PaperOrderSubmitError.PRICE_DRIFT_EXCEEDED to
-                submitTestGateInput().copy(priceSnapshot = submitTestPrice(price = 501.26)),
+                submitTestGateInput().copy(executionReference = submitTestPrice(price = 501.26)),
             PaperOrderSubmitError.PREFLIGHT_BLOCKED to
                 submitTestGateInput().copy(preflight = submitTestPreflight(PreflightStatus.BLOCKED)),
             PaperOrderSubmitError.READINESS_MISSING to
@@ -97,17 +118,27 @@ class PaperManualSubmitGateTest {
     }
 
     @Test
-    fun `approved fresher source within drift tolerance passes full gate`() {
+    fun `approved fresher trusted quote within drift tolerance passes full gate`() {
         val decision = enabledGate().evaluate(
             submitTestGateInput().copy(
-                priceSnapshot = submitTestPrice(
-                    price = 500.50,
-                    source = MarketPriceSource.LIVE_QUOTE_MID,
-                    ageMillis = 100L,
-                ),
+                executionReference = submitTestPrice(price = 500.50, ageMillis = 100L),
             ),
         )
         assertEquals(PaperManualSubmitGateDecision.Allowed, decision)
+    }
+
+    @Test
+    fun `a legacy Room preview with a trusted final quote is blocked, never allowed`() {
+        val decision = enabledGate().evaluate(
+            submitTestGateInput().copy(
+                preview = submitTestPreview(priceSource = MarketPriceSource.ROOM_BAR_CLOSE),
+            ),
+        )
+        assertTrue(decision is PaperManualSubmitGateDecision.Blocked)
+        assertTrue(
+            (decision as PaperManualSubmitGateDecision.Blocked).reasons
+                .contains(PaperOrderSubmitError.PRICE_NOT_FRESH),
+        )
     }
 
     @Test

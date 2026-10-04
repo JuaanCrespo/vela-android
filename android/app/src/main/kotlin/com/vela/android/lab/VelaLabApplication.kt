@@ -14,7 +14,6 @@ import com.vela.android.lab.data.market.source.alpaca.EncryptedPrefsAlpacaCreden
 import com.vela.android.lab.data.market.source.alpaca.OkHttpAlpacaWebSocketFactory
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsProvider
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsStore
-import com.vela.android.lab.data.market.price.MarketPriceFreshnessPolicy
 import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
 import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import com.vela.android.lab.data.paper.AlpacaHttpClient
@@ -250,18 +249,14 @@ class VelaLabApplication : Application() {
         PaperOrderPayloadPreviewRepository(database.paperOrderPayloadPreviewDao())
     }
 
-    // --- Phase 2.o: local-only market price snapshot + freshness gate
+    // --- Phase 2.o / 3.a.1-C: local-only execution-authority price source
 
-    val marketPriceFreshnessPolicy: MarketPriceFreshnessPolicy by lazy {
-        MarketPriceFreshnessPolicy()
-    }
-
+    /**
+     * Execution-authority price source (3.a.1-C). Built from the live tick buffer only. It has no
+     * Room dependency, so a persisted bar cannot become an execution reference.
+     */
     val marketPriceSnapshotProvider: MarketPriceSnapshotProvider by lazy {
-        MarketPriceSnapshotProvider(
-            tickBuffer = marketTickBuffer,
-            marketDataRepository = marketDataRepository,
-            freshnessPolicy = marketPriceFreshnessPolicy,
-        )
+        MarketPriceSnapshotProvider(tickBuffer = marketTickBuffer)
     }
 
     // --- Manual, read-only lifecycle lookup for an already-submitted Paper order
@@ -328,7 +323,7 @@ class VelaLabApplication : Application() {
             tokenStore = paperManualSubmitTokenStore,
             submitClient = paperManualOrderSubmitClient,
             auditRepository = paperOrderSubmitAuditRepository,
-            finalPriceSnapshotProvider = marketPriceSnapshotProvider::snapshotFor,
+            executionReferenceProvider = marketPriceSnapshotProvider::executionReferenceFor,
         )
     }
 }

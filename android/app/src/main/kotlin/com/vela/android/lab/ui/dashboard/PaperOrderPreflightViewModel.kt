@@ -2,7 +2,7 @@ package com.vela.android.lab.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
 import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
 import com.vela.android.lab.data.market.price.MarketPriceSource
 import com.vela.android.lab.data.market.price.PriceFreshness
@@ -33,7 +33,6 @@ import com.vela.android.lab.data.paper.preflight.PaperOrderRequestDraftStatus
 import com.vela.android.lab.data.paper.preflight.PaperOrderRequestDraftValidation
 import com.vela.android.lab.data.paper.preflight.PreflightStatus
 import com.vela.android.lab.data.paper.preflight.TimeInForce
-import com.vela.android.lab.data.repository.MarketDataRepository
 import com.vela.android.lab.data.repository.SignalRepository
 import com.vela.android.lab.data.watchlist.WatchlistRepository
 import com.vela.android.lab.state.AppState
@@ -69,7 +68,6 @@ class PaperOrderPreflightViewModel(
     private val client: AlpacaPaperReadOnlyClient,
     private val credentialsStore: SecureAlpacaCredentialsStore,
     private val watchlistRepository: WatchlistRepository,
-    private val marketDataRepository: MarketDataRepository,
     private val signalRepository: SignalRepository,
     private val appState: AppState,
     private val auditRepository: PaperOrderDryRunAuditRepository? = null,
@@ -604,9 +602,10 @@ class PaperOrderPreflightViewModel(
             positionsFetch is AlpacaPaperReadOnlyClient.FetchResult.Ok<*>,
         ).all { it }
         val watchlist = watchlistRepository.load().toSet()
-        val latestBar = marketDataRepository.recentBars(symbol.uppercase(), 1).lastOrNull()
         val latestSignal = signalRepository.latestFor(symbol.uppercase())?.state?.value
-        val priceSnapshot: MarketPriceSnapshot? = priceSnapshotProvider?.snapshotFor(symbol)
+        // 3.a.1-C: the only price authority. Persisted Room closes are not consulted.
+        val executionReference: ExecutionReferencePrice? =
+            priceSnapshotProvider?.executionReferenceFor(symbol)
 
         val intent = PaperOrderIntent(
             symbol = symbol,
@@ -623,12 +622,11 @@ class PaperOrderPreflightViewModel(
             account = account,
             clockSnap = clockSnap,
             positions = positions,
-            latestLocalClose = latestBar?.close,
             latestSignalState = latestSignal,
             watchlist = watchlist,
             appState = appState,
             credentialsConfigured = credentialsConfigured,
-            priceSnapshot = priceSnapshot,
+            executionReference = executionReference,
         )
         var auditPersisted = false
         val auditError: String? = try {

@@ -1,6 +1,7 @@
 package com.vela.android.lab.data.paper.preflight
 
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
+import com.vela.android.lab.data.market.price.ExecutionPriceRejection
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
 import com.vela.android.lab.data.market.price.MarketPriceSource
 import com.vela.android.lab.data.market.price.PriceFreshness
 import com.vela.android.lab.data.paper.HIGH_ALLOCATION_PERCENT_THRESHOLD
@@ -31,13 +32,20 @@ import kotlin.math.abs
  *  - Market closed is a **warning**, not a block — `DAY` orders
  *    queued outside market hours still preflight cleanly; the
  *    operator just needs to know.
- *  - Missing latest local close is a **block** because notional /
- *    buying-power impact can't be estimated.
  *  - Selling more than the held quantity is a **block** (the lab
  *    has no short-selling design yet).
  *  - High allocation post-fill is a **warning** (> 25%).
  *  - Symbol not on the watchlist is a **warning**.
  *  - No local signal for the symbol is a **warning**.
+ *
+ * Phase 3.a.1-C price policy:
+ *
+ *  - The only price authority is an [ExecutionReferencePrice.Trusted] live quote. A missing,
+ *    rejected, stale, or non-IEX reference is a **block** (`NoTrustedExecutionPrice`), for every
+ *    order type. Notional and buying power are never estimated from an untrusted price.
+ *  - Persisted Room closes are not an input. The former latest-close fallback was removed.
+ *  - A LIMIT order keeps its operator-entered limit price for notional. It still requires a
+ *    trusted reference, because the final submit gate always requires one.
  */
 class PaperOrderPreflightEngine(
     private val highAllocationPercent: Double = HIGH_ALLOCATION_PERCENT_THRESHOLD,
@@ -48,12 +56,11 @@ class PaperOrderPreflightEngine(
         account: PaperAccountSnapshot?,
         clockSnap: PaperClockSnapshot?,
         positions: List<PaperPositionSnapshot>,
-        latestLocalClose: Double?,
         latestSignalState: String?,
         watchlist: Set<String>,
         appState: AppState,
         credentialsConfigured: Boolean,
-        priceSnapshot: MarketPriceSnapshot? = null,
+        executionReference: ExecutionReferencePrice? = null,
     ): PaperOrderPreflightResult {
         val blocks = mutableListOf<PreflightBlockReason>()
         val warnings = mutableListOf<PreflightWarning>()
@@ -85,21 +92,27 @@ class PaperOrderPreflightEngine(
             if (account.tradingBlocked) blocks += PreflightBlockReason.TradingBlocked
         }
 
-        // --- Latest price + notional ---------------------------------------
-        // Phase 2.o: a snapshot is the preferred source. The
-        // legacy `latestLocalClose` parameter remains for backwards
-        // compatibility with older test fixtures.
-        val snapshotPrice = priceSnapshot?.takeIf { it.hasPrice }?.price
+        // --- Execution reference + notional --------------------------------
+        // 3.a.1-C: a missing reference is the same as a rejected one. No fallback exists.
+        // A trusted reference authorizes only the symbol it was derived for (SYMBOL_MISMATCH otherwise).
+        val intentSymbol = intent.symbol.trim().uppercase()
+        val reference: ExecutionReferencePrice = executionReference
+            ?: ExecutionReferencePrice.Rejected(intentSymbol, ExecutionPriceRejection.NOT_PROVIDED)
+        val trusted = (reference as? ExecutionReferencePrice.Trusted)?.takeIf { it.symbol == intentSymbol }
+        val untrustedReason: ExecutionPriceRejection? = when {
+            trusted != null -> null
+            reference is ExecutionReferencePrice.Rejected -> reference.reason
+            else -> ExecutionPriceRejection.SYMBOL_MISMATCH
+        }
+        if (untrustedReason != null) {
+            blocks += PreflightBlockReason.NoTrustedExecutionPrice(untrustedReason)
+        }
         val priceUsed: Double? = when {
+            trusted == null -> null
             intent.type == OrderType.LIMIT && intent.limitPriceUsd != null -> intent.limitPriceUsd
-            snapshotPrice != null -> snapshotPrice
-            latestLocalClose != null -> latestLocalClose
-            else -> null
+            else -> trusted.price
         }
         val notional = priceUsed?.let { it * intent.quantity }
-        if (priceUsed == null) {
-            blocks += PreflightBlockReason.MissingLatestPrice
-        }
 
         // --- Side-specific blocks ------------------------------------------
         val heldQty = normalizedSymbol?.let { sym ->
@@ -169,17 +182,6 @@ class PaperOrderPreflightEngine(
             // block already captured this; surface a paired warning.
             warnings += PreflightWarning.NoLatestPriceWarning
         }
-        // Phase 2.o stale-price warning: only when the snapshot was
-        // used (not when a LIMIT price overrode it).
-        if (priceSnapshot != null
-            && priceSnapshot.freshness == PriceFreshness.STALE
-            && priceUsed == snapshotPrice
-        ) {
-            warnings += PreflightWarning.StalePrice(
-                source = priceSnapshot.source.name,
-                ageMillis = priceSnapshot.ageMillis ?: -1L,
-            )
-        }
 
         val status = when {
             blocks.isNotEmpty() -> PreflightStatus.BLOCKED
@@ -198,11 +200,13 @@ class PaperOrderPreflightEngine(
             marketOpen = clockSnap?.isOpen,
             blockReasons = blocks,
             warnings = warnings,
-            priceSource = priceSnapshot?.source?.name
-                ?: if (priceUsed != null) MarketPriceSource.ROOM_BAR_CLOSE.name else MarketPriceSource.NONE.name,
-            priceFreshness = priceSnapshot?.freshness?.name
-                ?: if (priceUsed != null) PriceFreshness.STALE.name else PriceFreshness.MISSING.name,
-            priceAgeMillis = priceSnapshot?.ageMillis,
+            priceSource = trusted?.source?.name ?: MarketPriceSource.NONE.name,
+            priceFreshness = if (trusted != null) {
+                PriceFreshness.FRESH.name
+            } else {
+                PriceFreshness.MISSING.name
+            },
+            priceAgeMillis = trusted?.ageMillis,
         )
     }
 }

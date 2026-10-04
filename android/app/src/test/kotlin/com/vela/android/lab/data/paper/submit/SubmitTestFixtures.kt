@@ -1,8 +1,11 @@
 package com.vela.android.lab.data.paper.submit
 
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
+import com.vela.android.lab.data.market.price.ExecutionReferencePriceEvaluator
+import com.vela.android.lab.data.market.price.LiveQuoteObservation
 import com.vela.android.lab.data.market.price.MarketPriceSource
 import com.vela.android.lab.data.market.price.PriceFreshness
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
 import com.vela.android.lab.data.paper.preflight.IntentSource
 import com.vela.android.lab.data.paper.preflight.OrderSide
 import com.vela.android.lab.data.paper.preflight.OrderType
@@ -23,7 +26,7 @@ internal const val SUBMIT_TEST_NOW: Long = 10_000L
 
 internal fun submitTestPreview(
     previewPriceUsd: Double = 500.0,
-    priceSource: MarketPriceSource = MarketPriceSource.ROOM_BAR_CLOSE,
+    priceSource: MarketPriceSource = MarketPriceSource.LIVE_QUOTE_MID,
     priceFreshness: PriceFreshness = PriceFreshness.FRESH,
 ): PaperOrderPayloadPreview = PaperOrderPayloadPreview(
     previewId = "preview-submit-1",
@@ -71,28 +74,31 @@ internal fun submitTestPreflight(
     marketOpen = true,
     blockReasons = emptyList(),
     warnings = emptyList(),
-    priceSource = MarketPriceSource.ROOM_BAR_CLOSE.name,
+    priceSource = MarketPriceSource.LIVE_QUOTE_MID.name,
     priceFreshness = PriceFreshness.FRESH.name,
     priceAgeMillis = 1_000L,
 )
 
+/**
+ * A trusted real-feed execution reference, built through the production evaluator so the fixture
+ * obeys the same provenance and freshness rules as the app. Bid and ask are equal, so the mid
+ * equals [price] exactly.
+ */
 internal fun submitTestPrice(
-    freshness: PriceFreshness = PriceFreshness.FRESH,
     price: Double = 500.0,
     symbol: String = "SPY",
-    source: MarketPriceSource = MarketPriceSource.ROOM_BAR_CLOSE,
     ageMillis: Long = 1_000L,
-): MarketPriceSnapshot = MarketPriceSnapshot(
+    provenance: MarketDataProvenance = MarketDataProvenance.ALPACA_IEX_REAL_TIME,
+): ExecutionReferencePrice = ExecutionReferencePriceEvaluator().evaluate(
     symbol = symbol,
-    price = price,
-    bid = null,
-    ask = null,
-    marketTimestampMillis = SUBMIT_TEST_NOW - ageMillis,
-    deviceReceivedAtMillis = null,
-    ageMillis = ageMillis,
-    source = source,
-    freshness = freshness,
-    reason = null,
+    observation = LiveQuoteObservation(
+        bid = price,
+        ask = price,
+        provenance = provenance,
+        eventTimeEpochMillis = SUBMIT_TEST_NOW - ageMillis,
+        receivedAtEpochMillis = SUBMIT_TEST_NOW - ageMillis,
+    ),
+    nowEpochMillis = SUBMIT_TEST_NOW,
 )
 
 internal fun submitTestConfirmation(): PaperManualSubmitConfirmation =
@@ -102,7 +108,7 @@ internal fun submitTestConfirmation(): PaperManualSubmitConfirmation =
         symbol = "SPY",
         side = "BUY",
         quantity = 1.0,
-        priceSource = MarketPriceSource.ROOM_BAR_CLOSE.name,
+        priceSource = MarketPriceSource.LIVE_QUOTE_MID.name,
         priceFreshness = PriceFreshness.FRESH.name,
         previewGeneratedAtEpochMillis = 9_000L,
         issuedAtEpochMillis = 9_500L,
@@ -158,7 +164,7 @@ internal fun submitTestGateInput(
     accountRefreshedAtEpochMillis = 9_500L,
     clockRefreshedAtEpochMillis = 9_500L,
     marketOpen = true,
-    priceSnapshot = submitTestPrice(),
+    executionReference = submitTestPrice(),
     preflight = submitTestPreflight(),
     warningAccepted = true,
     disabledReadinessStatus = PaperExecutionReadinessStatus.READY_BUT_EXECUTION_DISABLED,

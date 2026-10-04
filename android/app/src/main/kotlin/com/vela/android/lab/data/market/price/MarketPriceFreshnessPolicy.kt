@@ -1,17 +1,12 @@
 package com.vela.android.lab.data.market.price
 
 /**
- * Phase 2.o explicit freshness thresholds for a [MarketPriceSnapshot].
+ * Explicit freshness thresholds per [MarketPriceSource].
  *
- * The policy is **explicit and testable**. It is **not** a hard
- * block by itself — it is an indicator the preflight engine
- * consumes to decide between a `WARNING_ONLY` and a `BLOCKED` status.
- *
- * Thresholds were chosen conservatively for a single-second-tape
- * IEX feed: a live quote older than 10 s is stale; a 1-minute bar
- * older than 90 s is stale; a Room bar older than 5 minutes is
- * stale and surfaced as such even though the preflight only uses
- * it as a fallback.
+ * The policy is **explicit and testable**. Phase 3.a.1-C uses the live-quote threshold as the
+ * execution limit (see [ExecutionReferencePriceEvaluator]). The Room-bar threshold is
+ * display-only. A Room bar is never an execution reference, and its bucket start is not a
+ * freshness clock for execution.
  *
  * **No method here submits orders or touches the network.**
  */

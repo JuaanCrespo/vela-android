@@ -1,6 +1,6 @@
 package com.vela.android.lab.data.paper.submit
 
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
 import com.vela.android.lab.data.paper.preflight.PaperExecutionReadinessStatus
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreview
 import com.vela.android.lab.data.paper.preflight.PaperOrderPreflightResult
@@ -18,7 +18,7 @@ data class PaperManualSubmitGateInput(
     val accountRefreshedAtEpochMillis: Long?,
     val clockRefreshedAtEpochMillis: Long?,
     val marketOpen: Boolean?,
-    val priceSnapshot: MarketPriceSnapshot?,
+    val executionReference: ExecutionReferencePrice?,
     val preflight: PaperOrderPreflightResult?,
     val warningAccepted: Boolean,
     val disabledReadinessStatus: PaperExecutionReadinessStatus?,
@@ -68,12 +68,14 @@ class PaperManualSubmitGate(
                 add(PaperOrderSubmitError.CLOCK_STALE)
             }
             if (input.marketOpen != true) add(PaperOrderSubmitError.MARKET_CLOSED)
-            when (evaluateFinalPrice(input.preview, input.priceSnapshot, input.nowEpochMillis).result) {
+            when (evaluateFinalPrice(input.preview, input.executionReference, input.nowEpochMillis).result) {
                 PaperFinalPriceGateResult.ALLOWED -> Unit
                 PaperFinalPriceGateResult.PRICE_NOT_FRESH ->
                     add(PaperOrderSubmitError.PRICE_NOT_FRESH)
                 PaperFinalPriceGateResult.PRICE_DRIFT_EXCEEDED ->
                     add(PaperOrderSubmitError.PRICE_DRIFT_EXCEEDED)
+                PaperFinalPriceGateResult.NO_TRUSTED_EXECUTION_PRICE ->
+                    add(PaperOrderSubmitError.NO_TRUSTED_EXECUTION_PRICE)
             }
             val preflight = input.preflight
             if (preflight == null ||
@@ -124,7 +126,7 @@ class PaperManualSubmitGate(
 
     fun evaluateFinalPrice(
         preview: PaperOrderPayloadPreview?,
-        finalPrice: MarketPriceSnapshot?,
+        finalPrice: ExecutionReferencePrice?,
         nowEpochMillis: Long,
     ): PaperFinalPriceEvaluation = finalPricePolicy.evaluate(
         preview = preview,

@@ -1,9 +1,10 @@
 package com.vela.android.lab.data.paper.submit
 
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
 import com.vela.android.lab.data.market.price.MarketPriceFreshnessPolicy
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
 import com.vela.android.lab.data.market.price.MarketPriceSource
 import com.vela.android.lab.data.market.price.PriceFreshness
+import com.vela.android.lab.data.market.price.conservativeAgeMillis
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreview
 import kotlin.math.abs
 import kotlin.math.min
@@ -12,6 +13,7 @@ enum class PaperFinalPriceGateResult {
     ALLOWED,
     PRICE_NOT_FRESH,
     PRICE_DRIFT_EXCEEDED,
+    NO_TRUSTED_EXECUTION_PRICE,
 }
 
 /** Credential-free diagnostics for the final manual-submit price gate. */
@@ -34,18 +36,23 @@ data class PaperFinalPriceEvaluation(
 }
 
 /**
- * Conservative Phase 2.v.1 price-parity policy hardened in Phase 2.v.3.
+ * Price-parity policy for the manual Paper submit (Phase 2.v.1, hardened in 2.v.3 and 3.a.1-C).
  *
- * It is pure and local: no network, credential, account, or order dependency. A final
- * price must be fresh, recent, source-compatible, and within the configured drift from
- * the immutable preview price.
+ * It is pure and local: no network, credential, account, or order dependency.
  *
- * Phase 2.v.3 adds a small explicit future-timestamp tolerance so that IEX exchange
- * timestamps arriving a few tens or hundreds of milliseconds ahead of the device clock
- * (a common condition on Android emulators whose kernel time trails host UTC even
- * after NTP sync) do not force a fail-closed `PRICE_NOT_FRESH`. Any raw age below
- * `-maxFutureSkewMillis` still blocks; the tolerance is small (default 2000 ms) and
- * is surfaced in the evaluation so the operator can never mistake it for a bypass.
+ * 3.a.1-C rules:
+ *  - The final price must be an [ExecutionReferencePrice.Trusted] live quote. Anything else,
+ *    including a missing reference, returns [PaperFinalPriceGateResult.NO_TRUSTED_EXECUTION_PRICE].
+ *  - Freshness uses the conservative age: the OLDER of the provider event time and the device
+ *    receipt time decides. The earlier policy used the newer timestamp, which is less
+ *    conservative. A Room bucket start is never a freshness clock.
+ *  - The preview must itself have been priced from a trusted source. A preview priced from a
+ *    legacy Room close, a demo bar, or any other non-trusted source can never pass. This closes
+ *    the self-comparison loophole, where the same legacy reference is compared with itself and
+ *    shows zero drift.
+ *
+ * A small future-timestamp tolerance ([maxFutureSkewMillis], default 2000 ms) absorbs device clocks
+ * that trail the provider clock. It is surfaced in the evaluation and is never a bypass.
  */
 class PaperFinalPriceStabilityPolicy(
     private val freshnessPolicy: MarketPriceFreshnessPolicy = MarketPriceFreshnessPolicy(),
@@ -67,25 +74,41 @@ class PaperFinalPriceStabilityPolicy(
 
     fun evaluate(
         preview: PaperOrderPayloadPreview?,
-        finalPrice: MarketPriceSnapshot?,
+        finalPrice: ExecutionReferencePrice?,
         nowEpochMillis: Long,
     ): PaperFinalPriceEvaluation {
         val previewPrice = previewPrice(preview)
-        val latest = finalPrice?.price
-        val rawAge = rawAgeMillis(finalPrice, nowEpochMillis)
-        val toleranceApplied =
-            rawAge != null && rawAge < 0L && rawAge >= -maxFutureSkewMillis
-        val effectiveAge: Long? = when {
-            rawAge == null -> null
-            toleranceApplied -> 0L
-            else -> rawAge
+        val reference = finalPrice as? ExecutionReferencePrice.Trusted
+        val latest = reference?.price
+        val rawAge = reference?.let {
+            maxOf(
+                nowEpochMillis - it.eventTimeEpochMillis,
+                nowEpochMillis - it.receivedAtEpochMillis,
+            )
         }
+        val effectiveAge = reference?.let {
+            conservativeAgeMillis(
+                eventTimeEpochMillis = it.eventTimeEpochMillis,
+                receivedAtEpochMillis = it.receivedAtEpochMillis,
+                nowEpochMillis = nowEpochMillis,
+                maxFutureSkewMillis = maxFutureSkewMillis,
+            )
+        }
+        val toleranceApplied = rawAge != null && rawAge < 0L && effectiveAge != null
         val previewSource = preview?.priceSource?.let(::sourceOrNull)
-        val finalSource = finalPrice?.source
-        val compatible = previewSource != null && finalSource != null &&
+        val finalSource = reference?.source
+        val compatible = previewSource != null &&
+            previewSource in TRUSTED_SOURCES &&
+            finalSource != null &&
             isSourceCompatible(previewSource, finalSource)
         val sourceFreshnessLimit = finalSource?.let(freshnessPolicy::thresholdFor)
         val allowedAge = sourceFreshnessLimit?.let { min(it, maxFinalPriceAgeMillis) }
+        val finalFreshness = when {
+            reference == null -> PriceFreshness.MISSING
+            effectiveAge != null && allowedAge != null && effectiveAge <= allowedAge ->
+                PriceFreshness.FRESH
+            else -> PriceFreshness.STALE
+        }
         val drift = if (previewPrice != null && latest != null &&
             latest.isFinite() && latest > 0.0
         ) {
@@ -97,18 +120,14 @@ class PaperFinalPriceStabilityPolicy(
         val freshAndValid = preview != null &&
             preview.priceFreshness == PriceFreshness.FRESH.name &&
             previewPrice != null &&
-            finalPrice != null &&
+            reference != null &&
             latest != null && latest.isFinite() && latest > 0.0 &&
-            finalPrice.symbol.trim().uppercase() == preview.symbol.trim().uppercase() &&
-            finalPrice.freshness == PriceFreshness.FRESH &&
-            finalSource != MarketPriceSource.NONE &&
-            compatible &&
-            rawAge != null && rawAge >= -maxFutureSkewMillis &&
-            effectiveAge != null && effectiveAge >= 0L &&
-            allowedAge != null && effectiveAge <= allowedAge &&
-            freshnessPolicy.classify(finalSource, effectiveAge) == PriceFreshness.FRESH
+            reference.symbol.trim().uppercase() == preview.symbol.trim().uppercase() &&
+            finalFreshness == PriceFreshness.FRESH &&
+            compatible
 
         val result = when {
+            reference == null -> PaperFinalPriceGateResult.NO_TRUSTED_EXECUTION_PRICE
             !freshAndValid -> PaperFinalPriceGateResult.PRICE_NOT_FRESH
             drift == null || drift > maxDriftPercent ->
                 PaperFinalPriceGateResult.PRICE_DRIFT_EXCEEDED
@@ -119,7 +138,7 @@ class PaperFinalPriceStabilityPolicy(
             previewPriceUsd = previewPrice,
             finalPriceUsd = latest,
             finalPriceSource = finalSource?.name,
-            finalPriceFreshness = finalPrice?.freshness?.name,
+            finalPriceFreshness = finalFreshness.name,
             finalPriceAgeMillis = effectiveAge,
             rawFinalPriceAgeMillis = rawAge,
             futureSkewToleranceApplied = toleranceApplied,
@@ -140,18 +159,6 @@ class PaperFinalPriceStabilityPolicy(
             return null
         }
         return (notional / quantity).takeIf { it.isFinite() && it > 0.0 }
-    }
-
-    private fun rawAgeMillis(
-        snapshot: MarketPriceSnapshot?,
-        nowEpochMillis: Long,
-    ): Long? {
-        snapshot ?: return null
-        val reference = listOfNotNull(
-            snapshot.marketTimestampMillis,
-            snapshot.deviceReceivedAtMillis,
-        ).maxOrNull()
-        return reference?.let { nowEpochMillis - it } ?: snapshot.ageMillis
     }
 
     private fun sourceOrNull(value: String): MarketPriceSource? =
@@ -187,5 +194,13 @@ class PaperFinalPriceStabilityPolicy(
         const val DEFAULT_MAX_DRIFT_PERCENT: Double = 0.25
         const val DEFAULT_MAX_FINAL_PRICE_AGE_MILLIS: Long = 10_000L
         const val DEFAULT_MAX_FUTURE_PRICE_SKEW_MILLIS: Long = 2_000L
+
+        /**
+         * Only a two-sided live quote mid may be an execution price (3.a.1-C). A one-sided quote is
+         * rejected upstream, so `LIVE_QUOTE_BID_ASK` is never trusted here.
+         */
+        private val TRUSTED_SOURCES: Set<MarketPriceSource> = setOf(
+            MarketPriceSource.LIVE_QUOTE_MID,
+        )
     }
 }

@@ -1,5 +1,7 @@
 package com.vela.android.lab.data.paper.preflight
 
+import com.vela.android.lab.data.market.price.ExecutionPriceRejection
+
 /**
  * Outcome of [PaperOrderPreflightEngine.preflight]. Pure data; no
  * Android imports. **The engine never sends a request.** Every
@@ -65,9 +67,15 @@ sealed interface PreflightBlockReason {
     object TradingBlocked : PreflightBlockReason {
         override val message: String = "Alpaca trading is BLOCKED."
     }
-    object MissingLatestPrice : PreflightBlockReason {
+    /**
+     * Phase 3.a.1-C: no trusted execution-reference price. Readiness fails closed. A persisted
+     * Room close, a demo bar, or a synthetic quote is never a substitute.
+     */
+    data class NoTrustedExecutionPrice(
+        val rejection: ExecutionPriceRejection,
+    ) : PreflightBlockReason {
         override val message: String =
-            "No latest local market data for the symbol; cannot estimate notional."
+            "No trusted execution-reference price (${rejection.name}); readiness fails closed."
     }
     data class InvalidQuantity(val quantity: Double) : PreflightBlockReason {
         override val message: String = "Quantity must be > 0 (got $quantity)."
@@ -110,18 +118,5 @@ sealed interface PreflightWarning {
     object NoLatestPriceWarning : PreflightWarning {
         override val message: String =
             "Notional could not be estimated because the latest price is unknown."
-    }
-
-    /**
-     * Phase 2.o — the freshest local price available was older than
-     * the freshness threshold. The dry-run still runs, but the
-     * operator should know the notional is based on a stale point.
-     */
-    data class StalePrice(
-        val source: String,
-        val ageMillis: Long,
-    ) : PreflightWarning {
-        override val message: String =
-            "Stale price from $source (age ${ageMillis}ms exceeds the freshness threshold)."
     }
 }

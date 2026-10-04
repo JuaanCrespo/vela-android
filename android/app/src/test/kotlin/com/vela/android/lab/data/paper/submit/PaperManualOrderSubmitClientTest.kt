@@ -24,6 +24,10 @@ class PaperManualOrderSubmitClientTest {
         assertEquals("1.0", body.getString("qty"))
         assertEquals("day", body.getString("time_in_force"))
         assertEquals("vela-client-submit-1", body.getString("client_order_id"))
+        // 3.a.1-C: a market order never transmits a price, whatever the execution reference is.
+        assertFalse(body.has("price"))
+        assertFalse(body.has("limit_price"))
+        assertFalse(body.has("stop_price"))
         assertFalse(body.has("key_id"))
         assertFalse(body.has("secret"))
         assertEquals(PaperOrderSubmitStatus.SUBMITTED, result.status)

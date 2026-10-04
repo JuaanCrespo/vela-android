@@ -1,6 +1,10 @@
 package com.vela.android.lab.data.paper.preflight
 
 import com.vela.android.lab.core.OperationMode
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
+import com.vela.android.lab.data.market.price.ExecutionReferencePriceEvaluator
+import com.vela.android.lab.data.market.price.LiveQuoteObservation
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
 import com.vela.android.lab.data.paper.PaperAccountSnapshot
 import com.vela.android.lab.data.paper.PaperClockSnapshot
 import com.vela.android.lab.data.paper.PaperPositionSnapshot
@@ -17,6 +21,8 @@ import org.junit.jupiter.api.TestFactory
 class PaperOrderPreflightEngineTest {
 
     private val engine = PaperOrderPreflightEngine()
+
+    private val nowMillis = 100_000L
 
     private fun account(
         equity: Double = 100_000.0,
@@ -59,6 +65,20 @@ class PaperOrderPreflightEngineTest {
         clientDryRunId = "dry-run-1",
     )
 
+    /** A trusted real-feed reference (bid = ask = [price], fresh), built through the evaluator. */
+    private fun trustedReference(price: Double, symbol: String = "SPY"): ExecutionReferencePrice =
+        ExecutionReferencePriceEvaluator().evaluate(
+            symbol = symbol,
+            observation = LiveQuoteObservation(
+                bid = price,
+                ask = price,
+                provenance = MarketDataProvenance.ALPACA_IEX_REAL_TIME,
+                eventTimeEpochMillis = nowMillis,
+                receivedAtEpochMillis = nowMillis,
+            ),
+            nowEpochMillis = nowMillis,
+        )
+
     @Test
     fun `valid BUY dry-run produces ALLOWED_DRY_RUN with no blocks`() {
         val result = engine.preflight(
@@ -66,7 +86,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(open = true),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = "BULLISH",
             watchlist = setOf("SPY"),
             appState = AppState(mode = OperationMode.READ_ONLY, realModeLocked = true),
@@ -88,7 +108,7 @@ class PaperOrderPreflightEngineTest {
             account = account(accountBlocked = true),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = "BULLISH",
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -105,7 +125,7 @@ class PaperOrderPreflightEngineTest {
             account = account(tradingBlocked = true),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = null,
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -122,7 +142,7 @@ class PaperOrderPreflightEngineTest {
             account = account(buyingPower = 1_000.0),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = null,
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -139,7 +159,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(open = false),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = "BULLISH",
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -157,14 +177,14 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = null,  // <-- missing
+            executionReference = null,  // <-- missing: no trusted reference
             latestSignalState = null,
             watchlist = setOf("SPY"),
             appState = AppState(),
             credentialsConfigured = true,
         )
         assertEquals(PreflightStatus.BLOCKED, result.status)
-        assertTrue(result.blockReasons.any { it is PreflightBlockReason.MissingLatestPrice })
+        assertTrue(result.blockReasons.any { it is PreflightBlockReason.NoTrustedExecutionPrice })
         assertNull(result.estimatedNotionalUsd)
     }
 
@@ -175,7 +195,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 200.0,
+            executionReference = trustedReference(200.0, symbol = "TSLA"),
             latestSignalState = "BULLISH",
             watchlist = setOf("SPY", "AAPL"),
             appState = AppState(),
@@ -197,7 +217,7 @@ class PaperOrderPreflightEngineTest {
             account = account(equity = 100_000.0, buyingPower = 1_000_000.0, portfolioValue = 100_000.0),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = "BULLISH",
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -220,7 +240,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = listOf(held),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = "BEARISH",
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -239,7 +259,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = "BULLISH",
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -257,7 +277,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = null,
             watchlist = setOf("SPY"),
             appState = state,
@@ -274,7 +294,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0, symbol = "BTC/USD"),
             latestSignalState = null,
             watchlist = emptySet(),
             appState = AppState(),
@@ -293,7 +313,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = null,
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -304,7 +324,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = null,
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -321,7 +341,7 @@ class PaperOrderPreflightEngineTest {
             account = account(),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = null,  // <-- no signal
             watchlist = setOf("SPY"),
             appState = AppState(),
@@ -340,7 +360,7 @@ class PaperOrderPreflightEngineTest {
             account = account(buyingPower = 10_000.0),
             clockSnap = clock(),
             positions = emptyList(),
-            latestLocalClose = 500.0,
+            executionReference = trustedReference(500.0),
             latestSignalState = "BULLISH",
             watchlist = setOf("SPY"),
             appState = AppState(),

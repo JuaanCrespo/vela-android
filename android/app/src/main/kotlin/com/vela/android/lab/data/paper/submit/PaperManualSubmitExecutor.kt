@@ -1,6 +1,7 @@
 package com.vela.android.lab.data.paper.submit
 
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
+import com.vela.android.lab.data.market.price.ExecutionPriceRejection
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
 import com.vela.android.lab.data.paper.preflight.PaperOrderPayloadPreview
 import java.time.Instant
 import kotlinx.coroutines.sync.Mutex
@@ -12,7 +13,7 @@ class PaperManualSubmitExecutor(
     private val tokenStore: PaperManualSubmitTokenStore,
     private val submitClient: PaperManualOrderSubmitClient,
     private val auditRepository: PaperOrderSubmitAuditRepository,
-    private val finalPriceSnapshotProvider: suspend (String) -> MarketPriceSnapshot,
+    private val executionReferenceProvider: suspend (String) -> ExecutionReferencePrice,
     private val clock: () -> Instant = { Instant.now() },
 ) {
     private val mutex = Mutex()
@@ -71,15 +72,15 @@ class PaperManualSubmitExecutor(
                 // audit and immediately before the only network boundary. This closes
                 // the suspension window in which the emergency kill switch can change.
                 val latestPrice = try {
-                    finalPriceSnapshotProvider(request.symbol)
+                    executionReferenceProvider(request.symbol)
                 } catch (_: Exception) {
-                    MarketPriceSnapshot.missing(
+                    ExecutionReferencePrice.Rejected(
                         request.symbol,
-                        "Final local price refresh failed.",
+                        ExecutionPriceRejection.PROVIDER_FAILED,
                     )
                 }
                 val finalInput = checkedInput.copy(
-                    priceSnapshot = latestPrice,
+                    executionReference = latestPrice,
                     nowEpochMillis = clock().toEpochMilli(),
                 )
                 when (val finalDecision = gate.evaluate(finalInput)) {

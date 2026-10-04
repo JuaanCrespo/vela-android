@@ -216,7 +216,6 @@ class MainActivity : ComponentActivity() {
                     client = app.alpacaPaperReadOnlyClient,
                     credentialsStore = app.alpacaCredentialsStore,
                     watchlistRepository = app.watchlistRepository,
-                    marketDataRepository = app.marketDataRepository,
                     signalRepository = app.signalRepository,
                     appState = app.appState,
                     auditRepository = app.paperOrderDryRunAuditRepository,

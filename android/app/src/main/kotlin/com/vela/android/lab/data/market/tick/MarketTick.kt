@@ -22,6 +22,12 @@ data class MarketTick(
     val marketTimestampMillis: Long,
     val receivedAtMillis: Long,
     val source: String,
+    /**
+     * Set by the producer from its connected endpoint (3.a.1-C). Defaults to
+     * [MarketDataProvenance.UNKNOWN], which is execution-ineligible, so a producer that
+     * forgets to declare provenance cannot create execution authority.
+     */
+    val provenance: MarketDataProvenance = MarketDataProvenance.UNKNOWN,
 ) {
     val spread: Double get() = askPrice - bidPrice
     val latencyMillis: Long get() = receivedAtMillis - marketTimestampMillis

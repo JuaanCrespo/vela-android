@@ -2,7 +2,12 @@
 
 package com.vela.android.lab.data.market.source.alpaca
 
+import com.vela.android.lab.data.market.price.ExecutionPriceRejection
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
+import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
 import com.vela.android.lab.data.market.tick.MarketTick
+import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.toList
@@ -47,6 +52,71 @@ class AlpacaStockQuoteEmissionTest {
             // marketTs = 2026-06-11T14:30:00.250Z, receivedAt = clock = 2026-06-11T14:30:00.500Z
             assertEquals(250L, tick.latencyMillis)
             assertEquals("alpaca-iex-stream", tick.source)
+            assertEquals(MarketDataProvenance.ALPACA_IEX_REAL_TIME, tick.provenance)
+            collector.cancel()
+        }
+
+    @Test
+    fun `IEX quote frame becomes a trusted execution reference end to end`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val factory = QuoteRecordingFactory()
+            val client = AlpacaStockMarketDataClient(
+                credentialsProvider = { AlpacaCredentials("PKABC", "secret") },
+                webSocketFactory = factory,
+                clock = fixedClock,
+            )
+            val captured = CopyOnWriteArrayList<MarketTick>()
+            val collector = launch { client.quotes.toList(captured) }
+            client.subscribe(setOf("SPY"))
+            client.connect()
+            factory.deliver("""[{"T":"success","msg":"connected"}]""")
+            factory.deliver("""[{"T":"success","msg":"authenticated"}]""")
+            factory.deliver(
+                """[{"T":"q","S":"SPY","bp":520.10,"ap":520.20,"t":"2026-06-11T14:30:00.250Z"}]""",
+            )
+
+            val buffer = MarketTickBuffer()
+            buffer.pushQuote(captured.single())
+            val reference = MarketPriceSnapshotProvider(tickBuffer = buffer, clock = fixedClock)
+                .executionReferenceFor("SPY")
+            val trusted = reference as ExecutionReferencePrice.Trusted
+            assertEquals(520.15, trusted.price, 1e-9)
+            assertEquals(250L, trusted.ageMillis)
+            collector.cancel()
+        }
+
+    @Test
+    fun `test-stream endpoint is reported as synthetic and can never become an execution reference`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val factory = QuoteRecordingFactory()
+            val client = AlpacaStockMarketDataClient(
+                credentialsProvider = { AlpacaCredentials("PKABC", "secret") },
+                webSocketFactory = factory,
+                clock = fixedClock,
+                endpoint = AlpacaStreamEndpoint.TEST_STREAM_URL,
+            )
+            val captured = CopyOnWriteArrayList<MarketTick>()
+            val collector = launch { client.quotes.toList(captured) }
+            client.subscribe(setOf("SPY"))
+            client.connect()
+            factory.deliver("""[{"T":"success","msg":"connected"}]""")
+            factory.deliver("""[{"T":"success","msg":"authenticated"}]""")
+            factory.deliver(
+                """[{"T":"q","S":"SPY","bp":520.10,"ap":520.20,"t":"2026-06-11T14:30:00.250Z"}]""",
+            )
+
+            val tick = captured.single()
+            assertEquals("alpaca-test-stream", tick.source)
+            assertEquals(MarketDataProvenance.ALPACA_TEST_SYNTHETIC, tick.provenance)
+
+            val buffer = MarketTickBuffer()
+            buffer.pushQuote(tick)
+            val reference = MarketPriceSnapshotProvider(tickBuffer = buffer, clock = fixedClock)
+                .executionReferenceFor("SPY")
+            assertEquals(
+                ExecutionPriceRejection.PROVENANCE_NOT_REAL_TIME,
+                (reference as ExecutionReferencePrice.Rejected).reason,
+            )
             collector.cancel()
         }
 

@@ -2,171 +2,210 @@
 
 package com.vela.android.lab.data.market.price
 
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
 import com.vela.android.lab.data.market.tick.MarketTick
 import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import com.vela.android.lab.data.repository.MarketDataRepository
-import com.vela.android.lab.db.room.dao.MarketBarDao
-import com.vela.android.lab.db.room.entities.MarketBar1mEntity
 import java.time.Instant
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
+/**
+ * Phase 3.a.1-C execution-authority resolver. The provider reads only the in-memory tick buffer.
+ * Every price below is a deterministic, credential-free fixture.
+ */
 class MarketPriceSnapshotProviderTest {
 
-    private fun newProvider(
-        tickBuffer: MarketTickBuffer,
-        marketDao: MarketBarDao,
-        nowMs: Long = 100_000L,
-    ): MarketPriceSnapshotProvider = MarketPriceSnapshotProvider(
-        tickBuffer = tickBuffer,
-        marketDataRepository = MarketDataRepository(marketDao),
-        freshnessPolicy = MarketPriceFreshnessPolicy(),
-        clock = { Instant.ofEpochMilli(nowMs) },
+    private val nowMs = 100_000L
+
+    private fun newProvider(tickBuffer: MarketTickBuffer): MarketPriceSnapshotProvider =
+        MarketPriceSnapshotProvider(
+            tickBuffer = tickBuffer,
+            clock = { Instant.ofEpochMilli(nowMs) },
+        )
+
+    private fun tick(
+        symbol: String = "SPY",
+        bid: Double = 520.10,
+        ask: Double = 520.20,
+        eventAgeMillis: Long = 500L,
+        receivedAgeMillis: Long = eventAgeMillis,
+        provenance: MarketDataProvenance = MarketDataProvenance.ALPACA_IEX_REAL_TIME,
+    ): MarketTick = MarketTick(
+        symbol = symbol,
+        bidPrice = bid,
+        askPrice = ask,
+        marketTimestampMillis = nowMs - eventAgeMillis,
+        receivedAtMillis = nowMs - receivedAgeMillis,
+        source = "alpaca-iex-stream",
+        provenance = provenance,
     )
 
+    private fun bufferWith(vararg ticks: MarketTick): MarketTickBuffer =
+        MarketTickBuffer().also { buffer -> ticks.forEach(buffer::pushQuote) }
+
     @Test
-    fun `live quote mid is the highest-priority source`() = runTest(UnconfinedTestDispatcher()) {
-        val buf = MarketTickBuffer()
-        buf.pushQuote(
-            MarketTick(
-                symbol = "SPY",
-                bidPrice = 520.10,
-                askPrice = 520.20,
-                marketTimestampMillis = 99_000L,
-                receivedAtMillis = 99_500L,
-                source = "alpaca-iex-stream",
+    fun `fresh real-feed IEX quote is the only execution authority and resolves to its mid`() = runBlocking {
+        val reference = newProvider(bufferWith(tick())).executionReferenceFor("SPY")
+        val trusted = reference as ExecutionReferencePrice.Trusted
+        assertEquals("SPY", trusted.symbol)
+        assertEquals(MarketPriceSource.LIVE_QUOTE_MID, trusted.source)
+        assertEquals(MarketDataProvenance.ALPACA_IEX_REAL_TIME, trusted.provenance)
+        assertEquals(520.15, trusted.price, 1e-9)
+        assertEquals(500L, trusted.ageMillis)
+    }
+
+    @Test
+    fun `no live quote yields NO_LIVE_QUOTE even if a persisted Room store holds a recent bar`() = runBlocking {
+        // The provider has no MarketDataRepository (see the structural test below), so a persisted
+        // bar, legacy or demo, cannot answer this call. Nothing is seeded into the provider.
+        val reference = newProvider(MarketTickBuffer()).executionReferenceFor("SPY")
+        assertEquals(
+            ExecutionPriceRejection.NO_LIVE_QUOTE,
+            (reference as ExecutionReferencePrice.Rejected).reason,
+        )
+    }
+
+    @Test
+    fun `provider has no dependency on the persisted market store`() {
+        val constructorTypes = MarketPriceSnapshotProvider::class.java.declaredConstructors
+            .flatMap { it.parameterTypes.toList() }
+        val fieldTypes = MarketPriceSnapshotProvider::class.java.declaredFields.map { it.type }
+        assertFalse(constructorTypes.any { it == MarketDataRepository::class.java })
+        assertFalse(fieldTypes.any { it == MarketDataRepository::class.java })
+    }
+
+    @Test
+    fun `synthetic FAKEPACA test-feed quote is rejected even when fresh`() = runBlocking {
+        val reference = newProvider(
+            bufferWith(tick(provenance = MarketDataProvenance.ALPACA_TEST_SYNTHETIC)),
+        ).executionReferenceFor("SPY")
+        val rejected = reference as ExecutionReferencePrice.Rejected
+        assertEquals(ExecutionPriceRejection.PROVENANCE_NOT_REAL_TIME, rejected.reason)
+        assertEquals(MarketDataProvenance.ALPACA_TEST_SYNTHETIC, rejected.provenance)
+    }
+
+    @Test
+    fun `demo in-memory quote is execution ineligible`() = runBlocking {
+        val reference = newProvider(
+            bufferWith(tick(provenance = MarketDataProvenance.LOCAL_DEMO_SYNTHETIC)),
+        ).executionReferenceFor("SPY")
+        assertEquals(
+            ExecutionPriceRejection.PROVENANCE_NOT_REAL_TIME,
+            (reference as ExecutionReferencePrice.Rejected).reason,
+        )
+    }
+
+    @Test
+    fun `quote with undeclared provenance is execution ineligible`() = runBlocking {
+        val undeclared = MarketTick(
+            symbol = "SPY",
+            bidPrice = 520.10,
+            askPrice = 520.20,
+            marketTimestampMillis = nowMs - 500L,
+            receivedAtMillis = nowMs - 500L,
+            source = "alpaca-iex-stream",
+        )
+        val reference = newProvider(bufferWith(undeclared)).executionReferenceFor("SPY")
+        assertEquals(
+            ExecutionPriceRejection.PROVENANCE_NOT_REAL_TIME,
+            (reference as ExecutionReferencePrice.Rejected).reason,
+        )
+    }
+
+    @Test
+    fun `stale IEX quote is rejected as STALE and no other source rescues it`() = runBlocking {
+        val reference = newProvider(
+            bufferWith(tick(eventAgeMillis = 60_000L)),
+        ).executionReferenceFor("SPY")
+        assertEquals(
+            ExecutionPriceRejection.STALE,
+            (reference as ExecutionReferencePrice.Rejected).reason,
+        )
+    }
+
+    @Test
+    fun `trusted quote that disappears is rejected, never replaced by an older value`() = runBlocking {
+        val buffer = bufferWith(tick())
+        val provider = newProvider(buffer)
+        assertTrue(provider.executionReferenceFor("SPY") is ExecutionReferencePrice.Trusted)
+        // The tick buffer is cleared, as it would be on a stream reset.
+        buffer.clear()
+        assertEquals(
+            ExecutionPriceRejection.NO_LIVE_QUOTE,
+            (provider.executionReferenceFor("SPY") as ExecutionReferencePrice.Rejected).reason,
+        )
+    }
+
+    @Test
+    fun `latest quote decides - a non-trusted newest quote blocks even if an older IEX quote exists`() = runBlocking {
+        val buffer = MarketTickBuffer()
+        buffer.pushQuote(tick(bid = 500.0, ask = 500.0, eventAgeMillis = 400L))
+        buffer.pushQuote(
+            tick(
+                bid = 500.0,
+                ask = 500.0,
+                eventAgeMillis = 100L,
+                provenance = MarketDataProvenance.ALPACA_TEST_SYNTHETIC,
             ),
         )
-        val provider = newProvider(buf, FakeBarDao(), nowMs = 100_000L)
-        val snap = provider.snapshotFor("SPY")
-        assertEquals(MarketPriceSource.LIVE_QUOTE_MID, snap.source)
-        assertEquals(PriceFreshness.FRESH, snap.freshness)
-        // mid = (520.10 + 520.20) / 2 = 520.15
-        assertEquals(520.15, requireNotNull(snap.price), 1e-9)
-        assertEquals(520.10, snap.bid)
-        assertEquals(520.20, snap.ask)
-        assertNotNull(snap.ageMillis)
-        assertEquals(500L, snap.ageMillis) // 100_000 - 99_500
-        assertNull(snap.reason)
+        assertEquals(
+            ExecutionPriceRejection.PROVENANCE_NOT_REAL_TIME,
+            (newProvider(buffer).executionReferenceFor("SPY") as ExecutionReferencePrice.Rejected).reason,
+        )
     }
 
     @Test
-    fun `falls back to Room bar close when no quote available`() = runTest(UnconfinedTestDispatcher()) {
-        val dao = FakeBarDao().also { dao ->
-            runBlocking {
-                dao.insert(
-                    MarketBar1mEntity(
-                        id = 0, symbol = "SPY",
-                        bucketStartEpochMillis = 90_000L,
-                        open = 1.0, high = 1.0, low = 1.0, close = 727.83,
-                        updateCount = 1, syntheticVolume = 1.0,
-                        lastUpdateTimeEpochMillis = null,
-                    ),
-                )
-            }
-        }
-        val provider = newProvider(MarketTickBuffer(), dao, nowMs = 100_000L)
-        val snap = provider.snapshotFor("SPY")
-        assertEquals(MarketPriceSource.ROOM_BAR_CLOSE, snap.source)
-        assertEquals(727.83, snap.price)
-        assertNull(snap.bid)
-        assertNull(snap.ask)
-        assertEquals(10_000L, snap.ageMillis)
-        // 10s old room bar is well below the 5-minute threshold → FRESH
-        assertEquals(PriceFreshness.FRESH, snap.freshness)
+    fun `bar-only symbol with no received quote is NO_LIVE_QUOTE`() = runBlocking {
+        val buffer = MarketTickBuffer()
+        buffer.recordBar("SPY")
+        assertEquals(
+            ExecutionPriceRejection.NO_LIVE_QUOTE,
+            (newProvider(buffer).executionReferenceFor("SPY") as ExecutionReferencePrice.Rejected).reason,
+        )
     }
 
     @Test
-    fun `returns MISSING when no quote and no Room bar exist`() =
-        runTest(UnconfinedTestDispatcher()) {
-            val provider = newProvider(MarketTickBuffer(), FakeBarDao(), nowMs = 100_000L)
-            val snap = provider.snapshotFor("SPY")
-            assertEquals(MarketPriceSource.NONE, snap.source)
-            assertEquals(PriceFreshness.MISSING, snap.freshness)
-            assertNull(snap.price)
-            assertFalse(snap.hasPrice)
-            assertNotNull(snap.reason)
-        }
-
-    @Test
-    fun `stale Room bar surfaces STALE and a reason string`() = runTest(UnconfinedTestDispatcher()) {
-        val dao = FakeBarDao().also { dao ->
-            runBlocking {
-                dao.insert(
-                    MarketBar1mEntity(
-                        id = 0, symbol = "SPY",
-                        bucketStartEpochMillis = 1_000L,
-                        open = 1.0, high = 1.0, low = 1.0, close = 500.0,
-                        updateCount = 1, syntheticVolume = 1.0,
-                        lastUpdateTimeEpochMillis = null,
-                    ),
-                )
-            }
-        }
-        // now - 1_000 = ~10 minutes old → above 5-minute threshold
-        val provider = newProvider(MarketTickBuffer(), dao, nowMs = 1_000L + 10L * 60_000L)
-        val snap = provider.snapshotFor("SPY")
-        assertEquals(MarketPriceSource.ROOM_BAR_CLOSE, snap.source)
-        assertEquals(PriceFreshness.STALE, snap.freshness)
-        assertNotNull(snap.reason)
-        assertTrue(snap.reason!!.contains("Room"))
-    }
-
-    @Test
-    fun `empty symbol returns MISSING immediately`() = runTest(UnconfinedTestDispatcher()) {
-        val provider = newProvider(MarketTickBuffer(), FakeBarDao())
-        val snap = provider.snapshotFor("")
-        assertEquals(MarketPriceSource.NONE, snap.source)
-        assertEquals(PriceFreshness.MISSING, snap.freshness)
-    }
-
-    @Test
-    fun `symbol is uppercased before lookup`() = runTest(UnconfinedTestDispatcher()) {
-        val dao = FakeBarDao().also { dao ->
-            runBlocking {
-                dao.insert(
-                    MarketBar1mEntity(
-                        id = 0, symbol = "SPY",
-                        bucketStartEpochMillis = 90_000L,
-                        open = 1.0, high = 1.0, low = 1.0, close = 100.0,
-                        updateCount = 1, syntheticVolume = 1.0,
-                        lastUpdateTimeEpochMillis = null,
-                    ),
-                )
-            }
-        }
-        val provider = newProvider(MarketTickBuffer(), dao, nowMs = 100_000L)
-        val snap = provider.snapshotFor("spy")
-        assertEquals("SPY", snap.symbol)
-        assertEquals(100.0, snap.price)
-    }
-
-    @Test
-    fun `stale live quote (older than 10s) is reported as STALE but still used`() =
-        runTest(UnconfinedTestDispatcher()) {
-            val buf = MarketTickBuffer()
-            buf.pushQuote(
-                MarketTick(
-                    symbol = "SPY",
-                    bidPrice = 100.0, askPrice = 101.0,
-                    marketTimestampMillis = 50_000L,
-                    receivedAtMillis = 60_000L,
-                    source = "alpaca-iex-stream",
-                ),
+    fun `invalid quotes never produce a zero, NaN or crossed price`() = runBlocking {
+        val cases = listOf(
+            tick(bid = 0.0, ask = 0.0),
+            tick(bid = Double.NaN, ask = Double.NaN),
+            tick(bid = 521.0, ask = 520.0),
+        )
+        for (case in cases) {
+            val reference = newProvider(bufferWith(case)).executionReferenceFor("SPY")
+            assertEquals(
+                ExecutionPriceRejection.INVALID_QUOTE,
+                (reference as ExecutionReferencePrice.Rejected).reason,
+                "quote bid=${case.bidPrice} ask=${case.askPrice}",
             )
-            val provider = newProvider(buf, FakeBarDao(), nowMs = 80_000L)
-            val snap = provider.snapshotFor("SPY")
-            assertEquals(MarketPriceSource.LIVE_QUOTE_MID, snap.source)
-            assertEquals(PriceFreshness.STALE, snap.freshness)
-            assertNotNull(snap.price)
         }
+    }
+
+    @Test
+    fun `empty symbol and unknown symbol return NO_LIVE_QUOTE without crashing`() = runBlocking {
+        val provider = newProvider(bufferWith(tick()))
+        assertEquals(
+            ExecutionPriceRejection.NO_LIVE_QUOTE,
+            (provider.executionReferenceFor("") as ExecutionReferencePrice.Rejected).reason,
+        )
+        assertEquals(
+            ExecutionPriceRejection.NO_LIVE_QUOTE,
+            (provider.executionReferenceFor("QQQ") as ExecutionReferencePrice.Rejected).reason,
+        )
+    }
+
+    @Test
+    fun `symbol is normalized before lookup`() = runBlocking {
+        val reference = newProvider(bufferWith(tick())).executionReferenceFor("  spy ")
+        val trusted = reference as ExecutionReferencePrice.Trusted
+        assertEquals("SPY", trusted.symbol)
+        assertNotNull(trusted.price)
+    }
 
     @Test
     fun `provider has no execution-shape method`() {
@@ -188,22 +227,4 @@ class MarketPriceSnapshotProviderTest {
             }
         }
     }
-}
-
-private class FakeBarDao : MarketBarDao {
-    private val rows: MutableList<MarketBar1mEntity> = mutableListOf()
-    private var nextId: Long = 1L
-    override suspend fun insert(bar: MarketBar1mEntity): Long {
-        val stored = if (bar.id == 0L) bar.copy(id = nextId++) else bar
-        rows += stored
-        return stored.id
-    }
-    override suspend fun insertAll(bars: List<MarketBar1mEntity>): List<Long> = bars.map { insert(it) }
-    override suspend fun bySymbol(symbol: String): List<MarketBar1mEntity> = rows.filter { it.symbol == symbol }
-    override suspend fun recent(symbol: String, limit: Int): List<MarketBar1mEntity> =
-        rows.filter { it.symbol == symbol }.sortedByDescending { it.bucketStartEpochMillis }.take(limit)
-    override suspend fun countBySymbol(symbol: String): Int = rows.count { it.symbol == symbol }
-    override suspend fun countAll(): Int = rows.size
-    override suspend fun deleteBySymbol(symbol: String) { rows.removeAll { it.symbol == symbol } }
-    override suspend fun clear() { rows.clear() }
 }

@@ -1,7 +1,13 @@
 package com.vela.android.lab.data.paper.submit
 
-import com.vela.android.lab.data.market.price.MarketPriceSnapshot
+import com.vela.android.lab.data.market.price.ExecutionPriceRejection
+import com.vela.android.lab.data.market.price.ExecutionReferencePrice
+import com.vela.android.lab.data.market.price.MarketPriceSnapshotProvider
+import com.vela.android.lab.data.market.tick.MarketDataProvenance
+import com.vela.android.lab.data.market.tick.MarketTick
+import com.vela.android.lab.data.market.tick.MarketTickBuffer
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -98,8 +104,61 @@ class PaperManualSubmitExecutorTest {
     }
 
     @Test
+    fun `trusted price that disappears before final submit is rejected with zero POST`() = runTest {
+        // Passed the review-time gate, then the live quote is gone at the final re-evaluation.
+        val fixture = fixture(
+            finalReference = ExecutionReferencePrice.Rejected("SPY", ExecutionPriceRejection.NO_LIVE_QUOTE),
+        )
+
+        val result = fixture.executor.executeOnce(
+            fixture.request,
+            fixture.preview,
+            fixture.gateInput,
+        )
+
+        assertEquals(PaperOrderSubmitStatus.BLOCKED, result.status)
+        assertEquals(PaperOrderSubmitError.NO_TRUSTED_EXECUTION_PRICE, result.errorCode)
+        assertEquals(1, fixture.finalPriceCalls())
+        assertEquals(0, fixture.http.callCount)
+        assertEquals(listOf("ATTEMPT_STARTED", "BLOCKED"), fixture.dao.rows.map { it.status })
+    }
+
+    @Test
+    fun `no trusted execution price at review or at submit sends zero POST`() = runTest {
+        // A demo or Room-only situation: no live trusted quote exists when the executor runs.
+        val fixture = fixture(
+            finalReference = ExecutionReferencePrice.Rejected("SPY", ExecutionPriceRejection.NO_LIVE_QUOTE),
+        )
+
+        val result = fixture.executor.executeOnce(
+            fixture.request,
+            fixture.preview,
+            fixture.gateInput.copy(executionReference = null),
+        )
+
+        assertEquals(PaperOrderSubmitStatus.BLOCKED, result.status)
+        assertEquals(PaperOrderSubmitError.NO_TRUSTED_EXECUTION_PRICE, result.errorCode)
+        assertEquals(0, fixture.http.callCount)
+    }
+
+    @Test
+    fun `final price provider failure fails closed with zero POST and no fallback value`() = runTest {
+        val fixture = fixture(finalProviderThrows = true)
+
+        val result = fixture.executor.executeOnce(
+            fixture.request,
+            fixture.preview,
+            fixture.gateInput,
+        )
+
+        assertEquals(PaperOrderSubmitStatus.BLOCKED, result.status)
+        assertEquals(PaperOrderSubmitError.NO_TRUSTED_EXECUTION_PRICE, result.errorCode)
+        assertEquals(0, fixture.http.callCount)
+    }
+
+    @Test
     fun `final drift above threshold is rechecked and sends zero POST`() = runTest {
-        val fixture = fixture(finalPriceSnapshot = submitTestPrice(price = 502.0))
+        val fixture = fixture(finalReference = submitTestPrice(price = 502.0))
 
         val result = fixture.executor.executeOnce(
             fixture.request,
@@ -135,10 +194,94 @@ class PaperManualSubmitExecutorTest {
         assertEquals(1, fixture.http.callCount)
     }
 
+    @Test
+    fun `trusted reference that ages out between review and submit is blocked with zero POST`() = runTest {
+        // Review and the start audit read the clock at SUBMIT_TEST_NOW. The final gate reads it 9.001 s later.
+        val calls = AtomicInteger(0)
+        val fixture = fixture(
+            executorClock = {
+                val call = calls.incrementAndGet()
+                Instant.ofEpochMilli(if (call <= 2) SUBMIT_TEST_NOW else SUBMIT_TEST_NOW + 9_001L)
+            },
+        )
+
+        val result = fixture.executor.executeOnce(fixture.request, fixture.preview, fixture.gateInput)
+
+        assertEquals(PaperOrderSubmitStatus.BLOCKED, result.status)
+        assertEquals(PaperOrderSubmitError.PRICE_NOT_FRESH, result.errorCode)
+        assertEquals(0, fixture.http.callCount)
+    }
+
+    @Test
+    fun `latest visible price becoming a demo quote before submit blocks with zero POST`() = runTest {
+        val review = trustedReviewReference(MarketDataProvenance.ALPACA_IEX_REAL_TIME)
+        val buffer = MarketTickBuffer()
+        buffer.pushQuote(executorTick(MarketDataProvenance.ALPACA_IEX_REAL_TIME, atMillis = SUBMIT_TEST_NOW - 500L))
+        val provider = MarketPriceSnapshotProvider(tickBuffer = buffer, clock = { Instant.ofEpochMilli(SUBMIT_TEST_NOW) })
+        // A demo quote becomes the newest visible price for the symbol before the final re-evaluation.
+        buffer.pushQuote(executorTick(MarketDataProvenance.LOCAL_DEMO_SYNTHETIC, atMillis = SUBMIT_TEST_NOW - 100L))
+        val fixture = fixture(finalProvider = { provider.executionReferenceFor(it) })
+
+        val result = fixture.executor.executeOnce(
+            fixture.request,
+            fixture.preview,
+            fixture.gateInput.copy(executionReference = review),
+        )
+
+        assertEquals(PaperOrderSubmitStatus.BLOCKED, result.status)
+        assertEquals(PaperOrderSubmitError.NO_TRUSTED_EXECUTION_PRICE, result.errorCode)
+        assertEquals(0, fixture.http.callCount)
+    }
+
+    @Test
+    fun `latest visible price switching to the TEST stream before submit blocks with zero POST`() = runTest {
+        val review = trustedReviewReference(MarketDataProvenance.ALPACA_IEX_REAL_TIME)
+        val buffer = MarketTickBuffer()
+        buffer.pushQuote(executorTick(MarketDataProvenance.ALPACA_IEX_REAL_TIME, atMillis = SUBMIT_TEST_NOW - 500L))
+        val provider = MarketPriceSnapshotProvider(tickBuffer = buffer, clock = { Instant.ofEpochMilli(SUBMIT_TEST_NOW) })
+        buffer.pushQuote(executorTick(MarketDataProvenance.ALPACA_TEST_SYNTHETIC, atMillis = SUBMIT_TEST_NOW - 100L))
+        val fixture = fixture(finalProvider = { provider.executionReferenceFor(it) })
+
+        val result = fixture.executor.executeOnce(
+            fixture.request,
+            fixture.preview,
+            fixture.gateInput.copy(executionReference = review),
+        )
+
+        assertEquals(PaperOrderSubmitStatus.BLOCKED, result.status)
+        assertEquals(PaperOrderSubmitError.NO_TRUSTED_EXECUTION_PRICE, result.errorCode)
+        assertEquals(0, fixture.http.callCount)
+    }
+
+    /** A trusted review-time reference from the real provider path, fresh at [SUBMIT_TEST_NOW]. */
+    private suspend fun trustedReviewReference(provenance: MarketDataProvenance): ExecutionReferencePrice {
+        val buffer = MarketTickBuffer()
+        buffer.pushQuote(executorTick(provenance, atMillis = SUBMIT_TEST_NOW - 500L))
+        val reference = MarketPriceSnapshotProvider(
+            tickBuffer = buffer,
+            clock = { Instant.ofEpochMilli(SUBMIT_TEST_NOW) },
+        ).executionReferenceFor("SPY")
+        assertTrue(reference is ExecutionReferencePrice.Trusted)
+        return reference
+    }
+
+    private fun executorTick(provenance: MarketDataProvenance, atMillis: Long): MarketTick = MarketTick(
+        symbol = "SPY",
+        bidPrice = 500.0,
+        askPrice = 500.0,
+        marketTimestampMillis = atMillis,
+        receivedAtMillis = atMillis,
+        source = "test-feed",
+        provenance = provenance,
+    )
+
     private fun fixture(
         failAudit: Boolean = false,
         compileEnabled: Boolean = true,
-        finalPriceSnapshot: MarketPriceSnapshot = submitTestPrice(),
+        finalReference: ExecutionReferencePrice = submitTestPrice(),
+        finalProviderThrows: Boolean = false,
+        executorClock: () -> Instant = { Instant.ofEpochMilli(SUBMIT_TEST_NOW) },
+        finalProvider: (suspend (String) -> ExecutionReferencePrice)? = null,
     ): ExecutorFixture {
         val preview = submitTestPreview()
         val tokenStore = PaperManualSubmitTokenStore(
@@ -164,11 +307,12 @@ class PaperManualSubmitExecutorTest {
                 clock = { Instant.ofEpochMilli(SUBMIT_TEST_NOW) },
             ),
             auditRepository = repository,
-            finalPriceSnapshotProvider = {
+            executionReferenceProvider = finalProvider ?: {
                 finalPriceCalls += 1
-                finalPriceSnapshot
+                if (finalProviderThrows) error("simulated provider failure")
+                finalReference
             },
-            clock = { Instant.ofEpochMilli(SUBMIT_TEST_NOW) },
+            clock = executorClock,
         )
         return ExecutorFixture(
             preview = preview,

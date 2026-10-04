@@ -100,14 +100,18 @@ class PaperOrderRequestDraftBuilderTest {
         val validation = builder.build(
             result(
                 status = PreflightStatus.BLOCKED,
-                blocks = listOf(PreflightBlockReason.MissingLatestPrice),
+                blocks = listOf(
+                    PreflightBlockReason.NoTrustedExecutionPrice(
+                        com.vela.android.lab.data.market.price.ExecutionPriceRejection.NOT_PROVIDED,
+                    ),
+                ),
             ),
         )
         assertTrue(validation is PaperOrderRequestDraftValidation.Rejected)
         validation as PaperOrderRequestDraftValidation.Rejected
         assertEquals(PaperOrderRequestDraftRejection.BLOCKED_PREFLIGHT, validation.reason)
         assertTrue(validation.message.contains("rejected", ignoreCase = true))
-        assertTrue(validation.message.contains("market data", ignoreCase = true))
+        assertTrue(validation.message.contains("execution-reference price", ignoreCase = true))
     }
 
     @Test

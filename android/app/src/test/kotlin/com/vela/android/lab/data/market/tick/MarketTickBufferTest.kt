@@ -25,6 +25,62 @@ class MarketTickBufferTest {
     )
 
     @Test
+    fun `concurrent quote pushes for two symbols keep the newest tick of each symbol`() {
+        // Publication must happen inside the lock. Otherwise a snapshot built from an older state can
+        // overwrite a newer one and silently drop the latest tick of the other symbol.
+        val buf = MarketTickBuffer(perSymbolCap = 100_000, totalCap = 1_000_000)
+        val perSymbol = 3_000
+        val start = java.util.concurrent.CountDownLatch(1)
+        val workers = listOf("SPY", "QQQ").map { symbol ->
+            Thread {
+                start.await()
+                for (i in 1..perSymbol) {
+                    buf.pushQuote(tick(symbol, 100.0, 100.1, marketMs = i.toLong(), receivedMs = i.toLong()))
+                }
+            }
+        }
+        workers.forEach { it.start() }
+        start.countDown()
+        workers.forEach { it.join() }
+        val stats = buf.snapshot.value.perSymbol
+        assertEquals(perSymbol.toLong(), stats.getValue("SPY").lastReceivedAtMillis)
+        assertEquals(perSymbol.toLong(), stats.getValue("QQQ").lastReceivedAtMillis)
+    }
+
+    @Test
+    fun `last quote provenance is carried into the per-symbol stats and follows the newest tick`() {
+        val buf = MarketTickBuffer()
+        buf.pushQuote(
+            tick("SPY", 500.0, 500.1, marketMs = 1_000L, receivedMs = 1_000L).copy(
+                provenance = MarketDataProvenance.ALPACA_IEX_REAL_TIME,
+            ),
+        )
+        assertEquals(
+            MarketDataProvenance.ALPACA_IEX_REAL_TIME,
+            buf.snapshot.value.perSymbol["SPY"]?.lastProvenance,
+        )
+        buf.pushQuote(
+            tick("SPY", 500.0, 500.1, marketMs = 2_000L, receivedMs = 2_000L).copy(
+                provenance = MarketDataProvenance.ALPACA_TEST_SYNTHETIC,
+            ),
+        )
+        assertEquals(
+            MarketDataProvenance.ALPACA_TEST_SYNTHETIC,
+            buf.snapshot.value.perSymbol["SPY"]?.lastProvenance,
+        )
+    }
+
+    @Test
+    fun `a tick built without a declared provenance is UNKNOWN`() {
+        val buf = MarketTickBuffer()
+        buf.pushQuote(tick("SPY", 500.0, 500.1, marketMs = 1_000L, receivedMs = 1_000L))
+        assertEquals(
+            MarketDataProvenance.UNKNOWN,
+            buf.snapshot.value.perSymbol["SPY"]?.lastProvenance,
+        )
+    }
+
+    @Test
     fun `initial snapshot is empty`() {
         val buf = MarketTickBuffer()
         val s = buf.snapshot.value

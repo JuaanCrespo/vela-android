@@ -41,7 +41,9 @@ class MarketTickBuffer(
      * snapshot atomically.
      */
     fun pushQuote(tick: MarketTick) {
-        val newSnapshot = synchronized(lock) {
+        // Build AND publish inside the lock. Publishing outside it let two concurrent
+        // updates overwrite each other with a snapshot built from an older state (3.a.1-C audit).
+        synchronized(lock) {
             val symbolBuf = perSymbol.getOrPut(tick.symbol) { ArrayDeque() }
             val prior = perSymbolPrior[tick.symbol]
             symbolBuf.addLast(tick)
@@ -59,7 +61,7 @@ class MarketTickBuffer(
                 dropped += 1
             }
             perSymbolPrior[tick.symbol] = tick
-            buildSnapshot(
+            _snapshot.value = buildSnapshot(
                 addQuotes = 1,
                 addBars = 0,
                 addDropped = dropped,
@@ -68,7 +70,6 @@ class MarketTickBuffer(
                 priorSymbolTick = prior,
             )
         }
-        _snapshot.value = newSnapshot
     }
 
     /**
@@ -78,9 +79,9 @@ class MarketTickBuffer(
      * received" alongside the quote stats.
      */
     fun recordBar(symbol: String) {
-        val newSnapshot = synchronized(lock) {
+        synchronized(lock) {
             perSymbolBarCount[symbol] = (perSymbolBarCount[symbol] ?: 0) + 1
-            buildSnapshot(
+            _snapshot.value = buildSnapshot(
                 addQuotes = 0,
                 addBars = 1,
                 addDropped = 0,
@@ -89,12 +90,11 @@ class MarketTickBuffer(
                 priorSymbolTick = perSymbolPrior[symbol],
             )
         }
-        _snapshot.value = newSnapshot
     }
 
     fun recordParserError(message: String) {
-        _snapshot.value = synchronized(lock) {
-            _snapshot.value.copy(lastParserError = message)
+        synchronized(lock) {
+            _snapshot.value = _snapshot.value.copy(lastParserError = message)
         }
     }
 
@@ -140,6 +140,7 @@ class MarketTickBuffer(
                     lastInterMessageMillis = interMsg,
                     quotesReceived = (priorStats?.quotesReceived ?: 0) + addQuotes,
                     barsReceived = barsForSymbol,
+                    lastProvenance = latest.provenance,
                 )
             } else {
                 // No quote yet (this was a bar-only record). Reuse prior
@@ -216,4 +217,6 @@ data class PerSymbolTickStats(
     val lastInterMessageMillis: Long?,
     val quotesReceived: Int,
     val barsReceived: Int,
+    /** Provenance of the most recent quote for this symbol (3.a.1-C). */
+    val lastProvenance: MarketDataProvenance = MarketDataProvenance.UNKNOWN,
 )
