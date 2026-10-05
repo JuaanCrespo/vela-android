@@ -88,12 +88,13 @@ class FeatureRepositoryTest {
         assertEquals(3, repo.count("BTC/USD"))
     }
 
+    /** Phase 3.a.1-D: the demo reset never clears features, so the repository exposes no clear or delete operation. */
     @Test
-    fun `clear removes everything`() = runBlocking {
-        val repo = FeatureRepository(FakeFeatureDao())
-        repo.persist(features())
-        repo.clear()
-        assertEquals(0, repo.count("BTC/USD"))
+    fun `repository exposes no clear or delete operation for features`() {
+        val deleteLike = FeatureRepository::class.java.methods
+            .map { it.name }
+            .filter { it.startsWith("clear") || it.startsWith("delete") || it.startsWith("remove") }
+        assertEquals(emptyList<String>(), deleteLike)
     }
 }
 

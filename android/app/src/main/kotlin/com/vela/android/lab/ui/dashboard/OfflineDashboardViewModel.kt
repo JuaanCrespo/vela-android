@@ -23,6 +23,10 @@ import kotlinx.coroutines.launch
  * [OfflineMarketPipelineCoordinator]. The pipeline result drives the
  * visible UI state, and persisted counts come from the repositories.
  *
+ * Phase 3.a.1-D.1: the generators run only when [demoGeneratorsEnabled] is true. The composition root sets it from
+ * the Debug build flag (`demoGeneratorsEnabledForThisBuild`). A closed gate rejects generation before any repository
+ * or coordinator call. The reset action stays available, because it writes no market data.
+ *
  * No network. No order submission. No Alpaca. No REAL unlock.
  */
 class OfflineDashboardViewModel(
@@ -31,11 +35,12 @@ class OfflineDashboardViewModel(
     private val featureRepository: FeatureRepository,
     private val signalRepository: SignalRepository,
     private val journalRepository: JournalRepository,
+    private val demoGeneratorsEnabled: Boolean,
     private val clock: () -> Instant = { Instant.now() },
 ) : ViewModel() {
 
     private val _uiState: MutableStateFlow<OfflineDashboardUiState> =
-        MutableStateFlow(OfflineDashboardUiState.Initial)
+        MutableStateFlow(OfflineDashboardUiState.Initial.copy(demoGeneratorsAvailable = demoGeneratorsEnabled))
 
     val uiState: StateFlow<OfflineDashboardUiState> = _uiState.asStateFlow()
 
@@ -44,6 +49,10 @@ class OfflineDashboardViewModel(
     private var spyPrice: Double = INITIAL_SPY_PRICE
 
     fun generateBtcUpdate() {
+        if (!demoGeneratorsEnabled) {
+            rejectDemoGeneration()
+            return
+        }
         viewModelScope.launch {
             sequenceCounter += 1
             btcPrice += BTC_TICK
@@ -60,6 +69,10 @@ class OfflineDashboardViewModel(
     }
 
     fun generateSpyUpdate() {
+        if (!demoGeneratorsEnabled) {
+            rejectDemoGeneration()
+            return
+        }
         viewModelScope.launch {
             sequenceCounter += 1
             spyPrice += SPY_TICK
@@ -75,22 +88,27 @@ class OfflineDashboardViewModel(
         }
     }
 
-    fun clearDemoState() {
-        viewModelScope.launch {
-            try {
-                marketDataRepository.clearAll()
-                featureRepository.clear()
-                signalRepository.clear()
-                journalRepository.clear()
-                sequenceCounter = 0
-                btcPrice = INITIAL_BTC_PRICE
-                spyPrice = INITIAL_SPY_PRICE
-                _uiState.value = OfflineDashboardUiState.Initial
-            } catch (exc: Exception) {
-                _uiState.update { current ->
-                    current.copy(lastError = "Clear failed: ${exc.message ?: exc::class.simpleName}")
-                }
-            }
+    /**
+     * Phase 3.a.1-D.1 rejection. A closed gate writes no market data and reports why. It does not throw, and it does
+     * not advance the price walk or the sequence counter.
+     */
+    private fun rejectDemoGeneration() {
+        _uiState.update { current ->
+            current.copy(demoStatus = DEMO_STATUS_DISABLED)
+        }
+    }
+
+    /**
+     * Resets only the in-memory demo price walk. Persisted market bars, features, signals, and journal
+     * rows are NOT deleted (Phase 3.a.1-D). Their provenance is mixed or unknown, so no demo-only subset
+     * can be identified safely. The sequence counter stays monotonic. The visible counters stay accurate
+     * because they are read from storage, not cleared.
+     */
+    fun resetDemoStatus() {
+        btcPrice = INITIAL_BTC_PRICE
+        spyPrice = INITIAL_SPY_PRICE
+        _uiState.update { current ->
+            current.copy(demoStatus = DEMO_STATUS_RESET, lastError = null)
         }
     }
 
@@ -124,5 +142,13 @@ class OfflineDashboardViewModel(
         private const val INITIAL_SPY_PRICE: Double = 400.0
         private const val BTC_TICK: Double = 5.0
         private const val SPY_TICK: Double = 0.25
+
+        /** Shown after a demo reset. It states what was kept. Nothing is reported as deleted. */
+        private const val DEMO_STATUS_RESET: String =
+            "Demo generator prices reset. Stored market bars, features, signals and journal were kept."
+
+        /** Shown when a closed build gate rejects a generator. Nothing is reported as written. */
+        private const val DEMO_STATUS_DISABLED: String =
+            "Demo generators are available only in Debug builds. No market data was written."
     }
 }

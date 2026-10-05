@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vela.android.lab.data.market.tick.PerSymbolTickStats
 import com.vela.android.lab.data.market.tick.TickBufferSnapshot
+import com.vela.android.lab.data.market.price.LegacyDisplayPrice
 import com.vela.android.lab.data.market.price.MarketPriceSource
 import com.vela.android.lab.data.market.price.PriceFreshness
 import com.vela.android.lab.data.paper.RiskFlag
@@ -197,7 +198,7 @@ fun OfflineDashboardScreen(
             navigate = navigate,
             generateBtc = viewModel::generateBtcUpdate,
             generateSpy = viewModel::generateSpyUpdate,
-            clearDemo = viewModel::clearDemoState,
+            resetDemoStatus = viewModel::resetDemoStatus,
             keyIdChanged = { alpacaViewModel?.onKeyIdInputChange(it) },
             secretChanged = { alpacaViewModel?.onSecretInputChange(it) },
             saveCredentials = { alpacaViewModel?.saveCredentials() },
@@ -312,7 +313,7 @@ fun OfflineDashboardContent(
     manualSubmitState: PaperManualSubmitUiState? = null,
     onGenerateBtc: () -> Unit,
     onGenerateSpy: () -> Unit,
-    onClear: () -> Unit,
+    onResetDemoStatus: () -> Unit,
     onKeyIdChange: (String) -> Unit = {},
     onSecretChange: (String) -> Unit = {},
     onSaveCredentials: () -> Unit = {},
@@ -383,11 +384,13 @@ fun OfflineDashboardContent(
                 subtitle = "Local demo generators and credential inputs.",
             )
             Spacer(modifier = Modifier.height(6.dp))
-            ControlsCard(
-                onGenerateBtc = onGenerateBtc,
-                onGenerateSpy = onGenerateSpy,
-                onClear = onClear,
-            )
+            if (state.demoGeneratorsAvailable) {
+                ControlsCard(
+                    onGenerateBtc = onGenerateBtc,
+                    onGenerateSpy = onGenerateSpy,
+                    onResetDemoStatus = onResetDemoStatus,
+                )
+            }
             if (alpacaState != null) {
                 Spacer(modifier = Modifier.height(12.dp))
                 AlpacaCredentialsCard(
@@ -1279,11 +1282,15 @@ internal fun ErrorCard(message: String) {
     }
 }
 
+/**
+ * Phase 3.a.1-D.1: the demo card. Both call sites sit behind the availability flag, so Release builds never compose
+ * it. The lower-layer guard in [OfflineDashboardViewModel] still rejects generation when the gate is closed.
+ */
 @Composable
 internal fun ControlsCard(
     onGenerateBtc: () -> Unit,
     onGenerateSpy: () -> Unit,
-    onClear: () -> Unit,
+    onResetDemoStatus: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -1304,9 +1311,9 @@ internal fun ControlsCard(
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = onClear,
+                onClick = onResetDemoStatus,
             ) {
-                Text(text = "Clear local demo state")
+                Text(text = "Reset demo status (stored data kept)")
             }
         }
     }
@@ -2211,7 +2218,7 @@ internal fun PaperPortfolioRiskCard(
                             "· alloc %.1f%% ".format(row.allocationPercent) +
                             "· wl ${row.inWatchlist}" +
                             " · sig ${row.latestSignalState ?: "—"}" +
-                            " · close ${formatPrice(row.latestLocalClose)}",
+                            " · ${LegacyDisplayPrice.LABEL}: ${formatPrice(row.legacyDisplayClose?.price)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2651,11 +2658,12 @@ private fun OfflineDashboardPreview() {
                 lastSignalScore = 0,
                 persistedBarCount = 1,
                 journalEventCount = 4,
+                demoGeneratorsAvailable = true,
             ),
             alpacaState = AlpacaTestStreamUiState.Initial,
             onGenerateBtc = {},
             onGenerateSpy = {},
-            onClear = {},
+            onResetDemoStatus = {},
         )
     }
 }

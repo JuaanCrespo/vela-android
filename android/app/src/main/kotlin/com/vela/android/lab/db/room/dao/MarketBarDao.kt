@@ -38,9 +38,14 @@ interface MarketBarDao {
     @Query("SELECT COUNT(*) FROM market_bars_1m")
     suspend fun countAll(): Int
 
+    /**
+     * Broad delete of persisted market bars. Phase 3.a.1-D: no production caller may use it. The rows
+     * are LEGACY_UNKNOWN_PROVENANCE and must be preserved. Do not call without a separate, reviewed phase.
+     */
     @Query("DELETE FROM market_bars_1m WHERE symbol = :symbol")
     suspend fun deleteBySymbol(symbol: String)
 
+    /** Broad delete of all persisted market bars. Forbidden in production (3.a.1-D). See [deleteBySymbol]. */
     @Query("DELETE FROM market_bars_1m")
     suspend fun clear()
 }

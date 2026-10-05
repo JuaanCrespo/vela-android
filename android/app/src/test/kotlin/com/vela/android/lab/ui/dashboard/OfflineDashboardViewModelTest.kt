@@ -1,29 +1,15 @@
 package com.vela.android.lab.ui.dashboard
 
-import com.vela.android.lab.data.market.FeatureEngine
-import com.vela.android.lab.data.market.OneMinuteBarAggregator
-import com.vela.android.lab.data.market.SignalEngine
-import com.vela.android.lab.data.pipeline.OfflineMarketPipelineCoordinator
-import com.vela.android.lab.data.repository.FeatureRepository
-import com.vela.android.lab.data.repository.JournalRepository
-import com.vela.android.lab.data.repository.MarketDataRepository
-import com.vela.android.lab.data.repository.SignalRepository
-import com.vela.android.lab.db.room.dao.FeatureDao
-import com.vela.android.lab.db.room.dao.JournalDao
-import com.vela.android.lab.db.room.dao.MarketBarDao
-import com.vela.android.lab.db.room.dao.SignalDao
-import com.vela.android.lab.db.room.entities.JournalEventEntity
 import com.vela.android.lab.db.room.entities.MarketBar1mEntity
-import com.vela.android.lab.db.room.entities.SymbolFeaturesEntity
-import com.vela.android.lab.db.room.entities.SymbolSignalEntity
-import java.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -35,63 +21,46 @@ import org.junit.jupiter.api.Test
  *
  * The Compose screen itself is not exercised here — Compose UI tests
  * are instrumented and require an emulator or device, which is not
- * attached to this host. The ViewModel + its repository wiring is
- * fully testable on the JVM via the existing fake-DAO pattern.
+ * attached to this host. The ViewModel and its repository wiring run
+ * on the JVM over the in-memory DAO fakes in `OfflineDemoTestDoubles.kt`.
+ *
+ * The build gate is passed explicitly. Configuration-specific checks
+ * live in `src/testDebug` and `src/testRelease`.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class OfflineDashboardViewModelTest {
 
-    private val fixedClock: () -> Instant = { Instant.parse("2026-01-01T14:30:00Z") }
+    private lateinit var harness: OfflineDemoHarness
 
-    private lateinit var marketDao: FakeMarketBarDao
-    private lateinit var featureDao: FakeFeatureDao
-    private lateinit var signalDao: FakeSignalDao
-    private lateinit var journalDao: FakeJournalDao
-
-    private lateinit var viewModel: OfflineDashboardViewModel
+    private val viewModel: OfflineDashboardViewModel get() = harness.viewModel
+    private val marketDao: DemoBarDao get() = harness.marketDao
+    private val featureDao: DemoFeatureDao get() = harness.featureDao
+    private val signalDao: DemoSignalDao get() = harness.signalDao
+    private val journalDao: DemoJournalDao get() = harness.journalDao
 
     @BeforeEach
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
-
-        marketDao = FakeMarketBarDao()
-        featureDao = FakeFeatureDao()
-        signalDao = FakeSignalDao()
-        journalDao = FakeJournalDao()
-
-        val marketRepo = MarketDataRepository(marketDao)
-        val featureRepo = FeatureRepository(featureDao)
-        val signalRepo = SignalRepository(signalDao)
-        val journalRepo = JournalRepository(journalDao)
-
-        val aggregator = OneMinuteBarAggregator(maxBarsPerSymbol = 8)
-        val features = FeatureEngine(aggregator, recentBarLimit = 8)
-        val signals = SignalEngine(features)
-
-        val coordinator = OfflineMarketPipelineCoordinator(
-            barAggregator = aggregator,
-            featureEngine = features,
-            signalEngine = signals,
-            marketDataRepository = marketRepo,
-            featureRepository = featureRepo,
-            signalRepository = signalRepo,
-            journalRepository = journalRepo,
-        )
-
-        viewModel = OfflineDashboardViewModel(
-            coordinator = coordinator,
-            marketDataRepository = marketRepo,
-            featureRepository = featureRepo,
-            signalRepository = signalRepo,
-            journalRepository = journalRepo,
-            clock = fixedClock,
-        )
+        harness = OfflineDemoHarness(demoGeneratorsEnabled = true)
     }
 
     @AfterEach
     fun tearDown() {
         Dispatchers.resetMain()
     }
+
+    /** A persisted BTC/USD bar in the generator's minute, as a legacy row would sit in the table. */
+    private fun legacyBtcRow(): MarketBar1mEntity = MarketBar1mEntity(
+        symbol = "BTC/USD",
+        bucketStartEpochMillis = OFFLINE_DEMO_CLOCK.toEpochMilli(),
+        open = 48_900.0,
+        high = 49_100.0,
+        low = 48_800.0,
+        close = 49_000.0,
+        updateCount = 7,
+        syntheticVolume = 3.0,
+        lastUpdateTimeEpochMillis = null,
+    )
 
     @Test
     fun `initial state shows READ_ONLY mode`() {
@@ -122,6 +91,8 @@ class OfflineDashboardViewModelTest {
         assertEquals(0, state.persistedBarCount)
         assertEquals(0, state.journalEventCount)
         assertNull(state.lastError)
+        assertNull(state.demoStatus)
+        assertTrue(state.demoGeneratorsAvailable)
     }
 
     @Test
@@ -168,29 +139,165 @@ class OfflineDashboardViewModelTest {
         assertEquals(8, viewModel.uiState.value.journalEventCount)
     }
 
+    /** DEMO_RESET_SCOPE_NARROW, case A: the reset keeps every persisted market bar. */
     @Test
-    fun `clear demo state resets the visible counters and last error`() {
+    fun `reset demo status preserves market bars`() {
         viewModel.generateBtcUpdate()
         viewModel.generateSpyUpdate()
-        // Pre-clear sanity: counters are non-zero.
-        assertTrue(viewModel.uiState.value.persistedBarCount > 0)
-        assertTrue(viewModel.uiState.value.journalEventCount > 0)
+        val bars = marketDao.rows.toList()
+        assertEquals(2, bars.size)
 
-        viewModel.clearDemoState()
+        viewModel.resetDemoStatus()
 
-        val cleared = viewModel.uiState.value
-        assertEquals(OfflineDashboardUiState.Initial, cleared)
-        assertEquals(0, cleared.persistedBarCount)
-        assertEquals(0, cleared.journalEventCount)
-        assertNull(cleared.lastSymbol)
-        assertNull(cleared.lastSignalState)
-        assertNull(cleared.lastError)
+        assertEquals(bars, marketDao.rows.toList())
+    }
 
-        // And the underlying tables are empty.
-        assertEquals(0, marketDao.rows.size)
-        assertEquals(0, featureDao.rows.size)
-        assertEquals(0, signalDao.rows.size)
-        assertEquals(0, journalDao.rows.size)
+    /** DEMO_RESET_SCOPE_NARROW, case B: the reset keeps every persisted feature row. */
+    @Test
+    fun `reset demo status preserves features`() {
+        viewModel.generateBtcUpdate()
+        viewModel.generateSpyUpdate()
+        val features = featureDao.rows.toList()
+        assertTrue(features.isNotEmpty())
+
+        viewModel.resetDemoStatus()
+
+        assertEquals(features, featureDao.rows.toList())
+    }
+
+    /** DEMO_RESET_SCOPE_NARROW, case C: the reset keeps every persisted signal row. */
+    @Test
+    fun `reset demo status preserves signals`() {
+        viewModel.generateBtcUpdate()
+        viewModel.generateSpyUpdate()
+        val signals = signalDao.rows.toList()
+        assertTrue(signals.isNotEmpty())
+
+        viewModel.resetDemoStatus()
+
+        assertEquals(signals, signalDao.rows.toList())
+    }
+
+    /** DEMO_RESET_SCOPE_NARROW, case D: the reset keeps every journal event. */
+    @Test
+    fun `reset demo status preserves journal`() {
+        viewModel.generateBtcUpdate()
+        viewModel.generateSpyUpdate()
+        val journal = journalDao.rows.toList()
+        assertTrue(journal.isNotEmpty())
+
+        viewModel.resetDemoStatus()
+
+        assertEquals(journal, journalDao.rows.toList())
+    }
+
+    /**
+     * DEMO_RESET_DURABLE_ATOMICITY_RISK=NONE: the reset performs no durable write or delete on any table. Its only
+     * effects are in memory, so a partial durable failure cannot leave the reset half applied.
+     */
+    @Test
+    fun `reset demo status performs no durable write or delete`() {
+        viewModel.generateBtcUpdate()
+        viewModel.generateSpyUpdate()
+        val writesBefore = durableCallCounts()
+
+        viewModel.resetDemoStatus()
+
+        assertEquals(writesBefore, durableCallCounts())
+    }
+
+    private fun durableCallCounts(): List<Int> = listOf(
+        marketDao.insertCalls,
+        marketDao.deleteBySymbolCalls,
+        marketDao.clearCalls,
+        featureDao.insertCalls,
+        featureDao.clearCalls,
+        signalDao.insertCalls,
+        signalDao.clearCalls,
+        journalDao.insertCalls,
+        journalDao.clearCalls,
+    )
+
+    /** LEGACY_MARKET_ROWS_PRESERVED: a legacy row the demo never writes survives demo activity and reset. */
+    @Test
+    fun `reset demo status leaves seeded legacy market bars unchanged`() {
+        val legacy = MarketBar1mEntity(
+            symbol = "AAPL",
+            bucketStartEpochMillis = java.time.Instant.parse("2025-12-31T20:00:00Z").toEpochMilli(),
+            open = 201.1,
+            high = 202.4,
+            low = 200.9,
+            close = 201.75,
+            updateCount = 7,
+            syntheticVolume = 3.0,
+            lastUpdateTimeEpochMillis = null,
+        )
+        runBlocking { marketDao.insert(legacy) }
+        val seeded = marketDao.rows.single { it.symbol == "AAPL" }
+
+        viewModel.generateBtcUpdate()
+        viewModel.resetDemoStatus()
+
+        assertEquals(seeded, marketDao.rows.single { it.symbol == "AAPL" })
+    }
+
+    /** DEMO_RESET_SCOPE_NARROW: the reset issues no delete and no clear on any table. */
+    @Test
+    fun `reset demo status issues no delete or clear on any table`() {
+        viewModel.generateBtcUpdate()
+        viewModel.generateSpyUpdate()
+
+        viewModel.resetDemoStatus()
+
+        assertEquals(0, marketDao.deleteBySymbolCalls)
+        assertEquals(0, marketDao.clearCalls)
+        assertEquals(0, featureDao.clearCalls)
+        assertEquals(0, signalDao.clearCalls)
+        assertEquals(0, journalDao.clearCalls)
+    }
+
+    /** The visible counters are read from storage, so they stay equal to the stored rows after a reset. */
+    @Test
+    fun `reset demo status keeps the visible counters equal to stored rows`() {
+        viewModel.generateBtcUpdate()
+        viewModel.generateSpyUpdate()
+
+        viewModel.resetDemoStatus()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.persistedBarCount > 0)
+        assertEquals(marketDao.rows.size, state.persistedBarCount)
+        assertEquals(journalDao.rows.size, state.journalEventCount)
+    }
+
+    /** The status reports what was kept, never what was deleted. A reset also clears a stale error. */
+    @Test
+    fun `reset demo status reports data kept and clears the last error`() {
+        marketDao.failInserts = true
+        viewModel.generateBtcUpdate()
+        assertNotNull(viewModel.uiState.value.lastError)
+
+        marketDao.failInserts = false
+        viewModel.resetDemoStatus()
+
+        val state = viewModel.uiState.value
+        assertNull(state.lastError)
+        val status = state.demoStatus.orEmpty()
+        assertTrue(status.contains("kept"), "demo status must say that stored data was kept")
+        assertFalse(status.contains("deleted", ignoreCase = true))
+        assertFalse(status.contains("cleared", ignoreCase = true))
+    }
+
+    @Test
+    fun `reset demo status restarts the demo price walk from its initial price`() {
+        viewModel.generateBtcUpdate()
+        viewModel.generateBtcUpdate()
+        assertEquals(50_010.0, viewModel.uiState.value.lastPrice)
+
+        viewModel.resetDemoStatus()
+        viewModel.generateBtcUpdate()
+
+        assertEquals(50_005.0, viewModel.uiState.value.lastPrice)
     }
 
     @Test
@@ -212,145 +319,85 @@ class OfflineDashboardViewModelTest {
         val stored = marketDao.rows.single()
         assertEquals("BTC/USD", stored.symbol)
     }
-}
 
-// --- Fake DAOs (private to this test, mirror SQL semantics) ----------
-
-private class FakeMarketBarDao : MarketBarDao {
-    val rows: MutableList<MarketBar1mEntity> = mutableListOf()
-    private var nextId: Long = 1L
-
-    override suspend fun insert(bar: MarketBar1mEntity): Long {
-        rows.removeAll {
-            it.symbol == bar.symbol && it.bucketStartEpochMillis == bar.bucketStartEpochMillis
-        }
-        val stored = if (bar.id == 0L) bar.copy(id = nextId++) else bar
-        rows += stored
-        return stored.id
+    /** RELEASE_DEMO_GENERATOR_REACHABILITY_ZERO at the ViewModel entry point: a closed gate hides the generators. */
+    @Test
+    fun `closed build gate reports demo generators unavailable`() {
+        val closed = OfflineDemoHarness(demoGeneratorsEnabled = false)
+        assertFalse(closed.viewModel.uiState.value.demoGeneratorsAvailable)
     }
 
-    override suspend fun insertAll(bars: List<MarketBar1mEntity>): List<Long> =
-        bars.map { insert(it) }
+    /** RELEASE_DEMO_MARKET_WRITE_PATHS_ZERO at the ViewModel entry point: a closed gate writes nothing and calls nothing. */
+    @Test
+    fun `closed build gate rejects demo generation without any write`() {
+        val closed = OfflineDemoHarness(demoGeneratorsEnabled = false)
 
-    override suspend fun bySymbol(symbol: String): List<MarketBar1mEntity> =
-        rows.filter { it.symbol == symbol }.sortedBy { it.bucketStartEpochMillis }
+        closed.viewModel.generateBtcUpdate()
+        closed.viewModel.generateSpyUpdate()
 
-    override suspend fun recent(symbol: String, limit: Int): List<MarketBar1mEntity> =
-        rows.filter { it.symbol == symbol }
-            .sortedByDescending { it.bucketStartEpochMillis }
-            .take(limit)
-
-    override suspend fun countBySymbol(symbol: String): Int =
-        rows.count { it.symbol == symbol }
-
-    override suspend fun countAll(): Int = rows.size
-
-    override suspend fun deleteBySymbol(symbol: String) {
-        rows.removeAll { it.symbol == symbol }
+        assertEquals(0, closed.marketDao.insertCalls)
+        assertEquals(0, closed.featureDao.insertCalls)
+        assertEquals(0, closed.signalDao.insertCalls)
+        assertEquals(0, closed.journalDao.insertCalls)
+        val state = closed.viewModel.uiState.value
+        assertNull(state.lastSymbol)
+        assertNull(state.lastError)
+        assertEquals(0, state.persistedBarCount)
+        assertTrue(state.demoStatus.orEmpty().contains("Debug builds"))
     }
 
-    override suspend fun clear() {
-        rows.clear()
-    }
-}
+    /** The closed gate keeps the reset action, and the reset stays non-destructive. */
+    @Test
+    fun `closed build gate keeps the reset action available and non-destructive`() {
+        val closed = OfflineDemoHarness(demoGeneratorsEnabled = false)
 
-private class FakeFeatureDao : FeatureDao {
-    val rows: MutableList<SymbolFeaturesEntity> = mutableListOf()
-    private var nextId: Long = 1L
+        closed.viewModel.resetDemoStatus()
 
-    override suspend fun insert(features: SymbolFeaturesEntity): Long {
-        rows.removeAll {
-            it.symbol == features.symbol && it.bucketStartEpochMillis == features.bucketStartEpochMillis
-        }
-        val stored = if (features.id == 0L) features.copy(id = nextId++) else features
-        rows += stored
-        return stored.id
+        assertTrue(closed.viewModel.uiState.value.demoStatus.orEmpty().contains("kept"))
+        assertEquals(0, closed.marketDao.deleteBySymbolCalls + closed.marketDao.clearCalls)
+        assertEquals(0, closed.featureDao.clearCalls + closed.signalDao.clearCalls + closed.journalDao.clearCalls)
     }
 
-    override suspend fun insertAll(features: List<SymbolFeaturesEntity>): List<Long> =
-        features.map { insert(it) }
+    /** RELEASE_LEGACY_ROW_MUTATION_BY_DEMO=0: a closed gate cannot overwrite a same-minute legacy row. */
+    @Test
+    fun `closed build gate leaves a same-minute legacy row unchanged`() {
+        val closed = OfflineDemoHarness(demoGeneratorsEnabled = false)
+        runBlocking { closed.marketDao.insert(legacyBtcRow()) }
+        val seeded = closed.marketDao.rows.single()
+        val insertsBefore = closed.marketDao.insertCalls
 
-    override suspend fun bySymbol(symbol: String): List<SymbolFeaturesEntity> =
-        rows.filter { it.symbol == symbol }.sortedBy { it.bucketStartEpochMillis }
+        closed.viewModel.generateBtcUpdate()
 
-    override suspend fun recent(symbol: String, limit: Int): List<SymbolFeaturesEntity> =
-        rows.filter { it.symbol == symbol }
-            .sortedByDescending { it.bucketStartEpochMillis }
-            .take(limit)
-
-    override suspend fun latestFor(symbol: String): SymbolFeaturesEntity? =
-        rows.filter { it.symbol == symbol }.maxByOrNull { it.bucketStartEpochMillis }
-
-    override suspend fun countBySymbol(symbol: String): Int =
-        rows.count { it.symbol == symbol }
-
-    override suspend fun clear() {
-        rows.clear()
-    }
-}
-
-private class FakeSignalDao : SignalDao {
-    val rows: MutableList<SymbolSignalEntity> = mutableListOf()
-    private var nextId: Long = 1L
-
-    override suspend fun insert(signal: SymbolSignalEntity): Long {
-        rows.removeAll {
-            it.symbol == signal.symbol && it.bucketStartEpochMillis == signal.bucketStartEpochMillis
-        }
-        val stored = if (signal.id == 0L) signal.copy(id = nextId++) else signal
-        rows += stored
-        return stored.id
+        assertEquals(seeded, closed.marketDao.rows.single())
+        assertEquals(insertsBefore, closed.marketDao.insertCalls)
     }
 
-    override suspend fun insertAll(signals: List<SymbolSignalEntity>): List<Long> =
-        signals.map { insert(it) }
+    /**
+     * DEBUG_DEMO_PERSISTENCE_REMAINS_LEGACY_CONTAMINATING_BY_DESIGN: an open gate writes through the same REPLACE
+     * insert, so a same-minute row is replaced. Debug rows stay quarantined with the legacy table, and they never gain
+     * trustworthy provenance.
+     */
+    @Test
+    fun `open build gate replaces a same-minute row by design`() {
+        val open = OfflineDemoHarness(demoGeneratorsEnabled = true)
+        val legacy = legacyBtcRow()
+        runBlocking { open.marketDao.insert(legacy) }
 
-    override suspend fun bySymbol(symbol: String): List<SymbolSignalEntity> =
-        rows.filter { it.symbol == symbol }.sortedBy { it.bucketStartEpochMillis }
+        open.viewModel.generateBtcUpdate()
 
-    override suspend fun recent(symbol: String, limit: Int): List<SymbolSignalEntity> =
-        rows.filter { it.symbol == symbol }
-            .sortedByDescending { it.bucketStartEpochMillis }
-            .take(limit)
-
-    override suspend fun latestFor(symbol: String): SymbolSignalEntity? =
-        rows.filter { it.symbol == symbol }.maxByOrNull { it.bucketStartEpochMillis }
-
-    override suspend fun byState(state: String, limit: Int): List<SymbolSignalEntity> =
-        rows.filter { it.state == state }
-            .sortedByDescending { it.bucketStartEpochMillis }
-            .take(limit)
-
-    override suspend fun clear() {
-        rows.clear()
-    }
-}
-
-private class FakeJournalDao : JournalDao {
-    val rows: MutableList<JournalEventEntity> = mutableListOf()
-    private var nextId: Long = 1L
-
-    override suspend fun insert(event: JournalEventEntity): Long {
-        val stored = if (event.id == 0L) event.copy(id = nextId++) else event
-        rows += stored
-        return stored.id
+        val stored = open.marketDao.rows.single()
+        assertEquals(50_005.0, stored.close)
+        assertFalse(stored.close == legacy.close)
     }
 
-    override suspend fun bySymbol(symbol: String): List<JournalEventEntity> =
-        rows.filter { it.symbol == symbol }.sortedBy { it.timestampEpochMillis }
+    /** DEBUG_DEMO_GENERATOR_AVAILABLE at the ViewModel entry point: an open gate exposes the generators and writes. */
+    @Test
+    fun `open build gate exposes the demo generators and writes a bar per update`() {
+        assertTrue(viewModel.uiState.value.demoGeneratorsAvailable)
 
-    override suspend fun byType(eventType: String, limit: Int): List<JournalEventEntity> =
-        rows.filter { it.eventType == eventType }
-            .sortedByDescending { it.timestampEpochMillis }
-            .take(limit)
+        viewModel.generateBtcUpdate()
 
-    override suspend fun inRange(startMillis: Long, endMillis: Long): List<JournalEventEntity> =
-        rows.filter { it.timestampEpochMillis in startMillis..endMillis }
-            .sortedBy { it.timestampEpochMillis }
-
-    override suspend fun countAll(): Int = rows.size
-
-    override suspend fun clear() {
-        rows.clear()
+        assertEquals(1, marketDao.insertCalls)
+        assertEquals(1, marketDao.rows.size)
     }
 }

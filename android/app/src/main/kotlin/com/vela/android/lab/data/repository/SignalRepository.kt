@@ -30,6 +30,4 @@ class SignalRepository(private val dao: SignalDao) {
         if (limit <= 0) return emptyList()
         return dao.byState(state.value, limit).map { it.toDomain() }
     }
-
-    suspend fun clear() = dao.clear()
 }

@@ -20,6 +20,7 @@ import com.vela.android.lab.ui.dashboard.PaperOrderPreflightViewModel
 import com.vela.android.lab.ui.dashboard.PaperManualSubmitViewModel
 import com.vela.android.lab.ui.dashboard.PaperPortfolioRiskViewModel
 import com.vela.android.lab.ui.dashboard.WatchlistViewModel
+import com.vela.android.lab.ui.dashboard.demoGeneratorsEnabledForThisBuild
 import com.vela.android.lab.ui.history.PaperOrderHistoryViewModel
 import com.vela.android.lab.ui.settings.VelaPreferencesViewModel
 import com.vela.android.lab.ui.theme.VelaLabTheme
@@ -112,6 +113,7 @@ class MainActivity : ComponentActivity() {
                     featureRepository = app.featureRepository,
                     signalRepository = app.signalRepository,
                     journalRepository = app.journalRepository,
+                    demoGeneratorsEnabled = demoGeneratorsEnabledForThisBuild(),
                 )
             }
         }

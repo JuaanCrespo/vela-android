@@ -36,6 +36,7 @@ interface FeatureDao {
     @Query("SELECT COUNT(*) FROM symbol_features WHERE symbol = :symbol")
     suspend fun countBySymbol(symbol: String): Int
 
+    /** Broad delete of all features. Forbidden in production (3.a.1-D): no production caller may use it. */
     @Query("DELETE FROM symbol_features")
     suspend fun clear()
 }

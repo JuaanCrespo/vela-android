@@ -30,6 +30,4 @@ class FeatureRepository(private val dao: FeatureDao) {
         if (normalized.isEmpty()) return 0
         return dao.countBySymbol(normalized)
     }
-
-    suspend fun clear() = dao.clear()
 }

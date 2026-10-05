@@ -39,6 +39,7 @@ interface SignalDao {
     )
     suspend fun byState(state: String, limit: Int): List<SymbolSignalEntity>
 
+    /** Broad delete of all signals. Forbidden in production (3.a.1-D): no production caller may use it. */
     @Query("DELETE FROM symbol_signals")
     suspend fun clear()
 }

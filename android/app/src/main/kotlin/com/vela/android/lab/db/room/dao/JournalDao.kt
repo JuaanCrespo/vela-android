@@ -34,6 +34,7 @@ interface JournalDao {
     @Query("SELECT COUNT(*) FROM journal_events")
     suspend fun countAll(): Int
 
+    /** Broad delete of all journal events. Forbidden in production (3.a.1-D): no production caller may use it. */
     @Query("DELETE FROM journal_events")
     suspend fun clear()
 }

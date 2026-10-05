@@ -47,6 +47,4 @@ class JournalRepository(private val dao: JournalDao) {
     }
 
     suspend fun count(): Int = dao.countAll()
-
-    suspend fun clear() = dao.clear()
 }

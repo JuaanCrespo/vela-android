@@ -20,6 +20,10 @@ data class OfflineDashboardUiState(
     val persistedBarCount: Int,
     val journalEventCount: Int,
     val lastError: String?,
+    /** Result of the last demo reset. It reports what was kept; it never reports data as deleted (3.a.1-D). */
+    val demoStatus: String? = null,
+    /** True only in Debug builds. Release hides the demo generators and rejects their calls (3.a.1-D.1). */
+    val demoGeneratorsAvailable: Boolean = false,
 ) {
     companion object {
         val Initial: OfflineDashboardUiState = OfflineDashboardUiState(

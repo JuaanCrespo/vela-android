@@ -114,14 +114,16 @@ class MarketDataRepositoryTest {
         assertEquals(0, repo.count(""))
     }
 
+    /**
+     * Phase 3.a.1-D: `market_bars_1m` holds legacy rows that must be preserved. The former `clear(symbol)`
+     * and `clearAll()` wrappers were removed, so the repository exposes no delete operation at all.
+     */
     @Test
-    fun `clear by symbol only removes that symbol`() = runBlocking {
-        val repo = MarketDataRepository(FakeMarketBarDao())
-        repo.persistBar(bar(symbol = "BTC/USD"))
-        repo.persistBar(bar(symbol = "SPY", minuteOffset = 1))
-        repo.clear("BTC/USD")
-        assertEquals(0, repo.count("BTC/USD"))
-        assertEquals(1, repo.count("SPY"))
+    fun `repository exposes no clear or delete operation for stored bars`() {
+        val deleteLike = MarketDataRepository::class.java.methods
+            .map { it.name }
+            .filter { it.startsWith("clear") || it.startsWith("delete") || it.startsWith("remove") }
+        assertEquals(emptyList<String>(), deleteLike)
     }
 
     @Test

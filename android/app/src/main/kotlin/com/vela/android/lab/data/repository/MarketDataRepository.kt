@@ -52,11 +52,7 @@ class MarketDataRepository(private val dao: MarketBarDao) {
 
     suspend fun countAll(): Int = dao.countAll()
 
-    suspend fun clear(symbol: String) {
-        val normalized = normalizeMarketSymbol(symbol)
-        if (normalized.isEmpty()) return
-        dao.deleteBySymbol(normalized)
-    }
-
-    suspend fun clearAll() = dao.clear()
+    // No delete operation is exposed here. `market_bars_1m` holds LEGACY_UNKNOWN_PROVENANCE rows that
+    // must be preserved (3.a.1-B / 3.a.1-D). The former `clear(symbol)` and `clearAll()` wrappers were
+    // removed because their only production caller was the demo reset.
 }

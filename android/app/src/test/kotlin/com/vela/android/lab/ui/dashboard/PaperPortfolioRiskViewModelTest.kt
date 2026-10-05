@@ -2,6 +2,7 @@
 
 package com.vela.android.lab.ui.dashboard
 
+import com.vela.android.lab.data.market.price.LegacyDisplayPrice
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentials
 import com.vela.android.lab.data.market.source.alpaca.AlpacaCredentialsProvider
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsStore
@@ -157,6 +158,7 @@ class PaperPortfolioRiskViewModelTest {
             assertNotNull(flag)
             assertEquals(RiskFlag.Severity.INFO, flag!!.severity)
             assertEquals("SPY", flag.symbol)
+            assertNull(s.exposures.single().legacyDisplayClose)
         }
 
     @Test
@@ -254,7 +256,8 @@ class PaperPortfolioRiskViewModelTest {
             vm.refresh()
             val row = vm.uiState.value.exposures.single()
             assertEquals("BULLISH", row.latestSignalState)
-            assertEquals(520.95, row.latestLocalClose)
+            // Display-only (3.a.1-D): the persisted close is exposed as a LegacyDisplayPrice, never a bare Double.
+            assertEquals(LegacyDisplayPrice(520.95), row.legacyDisplayClose)
         }
 
     @Test

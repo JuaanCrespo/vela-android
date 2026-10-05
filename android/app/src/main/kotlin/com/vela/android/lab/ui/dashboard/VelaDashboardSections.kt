@@ -82,7 +82,7 @@ internal data class VelaDashboardActions(
     val navigate: (VelaDestination) -> Unit,
     val generateBtc: () -> Unit,
     val generateSpy: () -> Unit,
-    val clearDemo: () -> Unit,
+    val resetDemoStatus: () -> Unit,
     val keyIdChanged: (String) -> Unit,
     val secretChanged: (String) -> Unit,
     val saveCredentials: () -> Unit,
@@ -450,7 +450,7 @@ private fun RiskSection(
             MetricGrid("Informativo", info.toString(), "Warnings", warnings.toString())
             SummaryRow("Blockers de cuenta existentes", blockers.toString())
             SummaryRow("Posiciones fuera de watchlist", risk?.exposures?.count { !it.inWatchlist }?.toString() ?: "0")
-            SummaryRow("Sin cierre local", risk?.exposures?.count { it.latestLocalClose == null }?.toString() ?: "0")
+            SummaryRow("Sin precio legado", risk?.exposures?.count { it.legacyDisplayClose == null }?.toString() ?: "0")
         }
         risk?.let { PaperPortfolioRiskCard(it, actions.riskRefresh) }
     }
@@ -565,7 +565,14 @@ private fun DiagnosticsSection(
             title = "Diagnostico",
             subtitle = "Pipeline, DB y streams fuera del flujo principal",
         )
-        ControlsCard(actions.generateBtc, actions.generateSpy, actions.clearDemo)
+        if (data.dashboard.demoGeneratorsAvailable) {
+            ControlsCard(
+                onGenerateBtc = actions.generateBtc,
+                onGenerateSpy = actions.generateSpy,
+                onResetDemoStatus = actions.resetDemoStatus,
+            )
+            data.dashboard.demoStatus?.let { SummaryRow("Demo status", it) }
+        }
         StatusCard(data.dashboard)
         PipelineCard(data.dashboard)
         CountersCard(data.dashboard)

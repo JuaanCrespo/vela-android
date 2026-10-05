@@ -2,6 +2,7 @@ package com.vela.android.lab.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vela.android.lab.data.market.price.LegacyDisplayPrice
 import com.vela.android.lab.data.market.source.alpaca.SecureAlpacaCredentialsStore
 import com.vela.android.lab.data.paper.AlpacaPaperReadOnlyClient
 import com.vela.android.lab.data.paper.HIGH_ALLOCATION_PERCENT_THRESHOLD
@@ -29,7 +30,8 @@ import kotlinx.coroutines.launch
  *  - existing [AlpacaPaperReadOnlyClient.fetchAccount] / `fetchClock`
  *    / `fetchPositions` (the three GET URLs already in scope)
  *  - existing [WatchlistRepository] (current watchlist set)
- *  - existing [MarketDataRepository] (latest persisted close per symbol)
+ *  - existing [MarketDataRepository] (latest persisted close per symbol,
+ *    exposed only as a [LegacyDisplayPrice]; never an execution input, 3.a.1-D)
  *  - existing [SignalRepository] (latest persisted signal state per symbol)
  *
  * No new network endpoint. No method on this class submits an
@@ -124,6 +126,8 @@ class PaperPortfolioRiskViewModel(
         } else {
             0.0
         }
+        // Display-only (3.a.1-D). The persisted close is wrapped as a LegacyDisplayPrice, which has no
+        // authority and no conversion to ExecutionReferencePrice. Nothing here feeds execution.
         val latestBar = marketDataRepository.recentBars(position.symbol, 1).lastOrNull()
         val latestSignal = signalRepository.latestFor(position.symbol)
         return PerSymbolPaperExposure(
@@ -135,7 +139,7 @@ class PaperPortfolioRiskViewModel(
             allocationPercent = allocationPercent,
             inWatchlist = position.symbol in watchlist,
             latestSignalState = latestSignal?.state?.value,
-            latestLocalClose = latestBar?.close,
+            legacyDisplayClose = latestBar?.close?.let(::LegacyDisplayPrice),
         )
     }
 
@@ -205,7 +209,7 @@ class PaperPortfolioRiskViewModel(
                     symbol = exposure.symbol,
                 )
             }
-            if (exposure.latestLocalClose == null) {
+            if (exposure.legacyDisplayClose == null) {
                 flags += RiskFlag(
                     code = RiskFlag.Code.NO_LOCAL_MARKET_DATA,
                     severity = RiskFlag.Severity.INFO,

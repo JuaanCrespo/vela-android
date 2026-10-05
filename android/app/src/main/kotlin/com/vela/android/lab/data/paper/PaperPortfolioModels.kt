@@ -1,5 +1,7 @@
 package com.vela.android.lab.data.paper
 
+import com.vela.android.lab.data.market.price.LegacyDisplayPrice
+
 /**
  * Phase 2.l read-only portfolio + risk models. Pure data; no
  * Android imports.
@@ -46,7 +48,8 @@ data class PaperPortfolioSnapshot(
  *  - the Paper position (qty, market value, unrealized P&L)
  *  - the current watchlist (`inWatchlist`)
  *  - the latest locally persisted signal state (`latestSignalState`)
- *  - the latest locally persisted bar close (`latestLocalClose`)
+ *  - the latest locally persisted bar close, as a display-only legacy price
+ *    (`legacyDisplayClose`, Phase 3.a.1-D). It is never an execution input.
  *
  * `allocationPercent = (|marketValue| / portfolioValue) * 100`, or
  * `0.0` if portfolio value is non-positive.
@@ -60,7 +63,7 @@ data class PerSymbolPaperExposure(
     val allocationPercent: Double,
     val inWatchlist: Boolean,
     val latestSignalState: String?,
-    val latestLocalClose: Double?,
+    val legacyDisplayClose: LegacyDisplayPrice?,
 )
 
 /**
