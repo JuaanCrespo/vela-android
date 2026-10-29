@@ -25,8 +25,9 @@ class MarketDatasetIsolationTest {
             assertFalse(Regex("Instant\\.now|System\\.(currentTimeMillis|nanoTime)|Random|UUID\\.randomUUID|Locale\\.getDefault|TimeZone\\.getDefault|\\bDouble\\b|\\bFloat\\b|toDouble\\(|market_bars_1m|MarketBar1mEntity|trainingEligible").containsMatchIn(file.readText()), file.name)
         }
     }
-    @Test fun `no external production consumer and no execution coupling`() {
-        main.walkTopDown().filter { it.extension == "kt" && !it.toPath().startsWith(domain.toPath()) }.forEach {
+    @Test fun `only dedicated storage can consume domain and no execution coupling`() {
+        val storage = File(main, "com/vela/android/lab/core/marketdataset/storage")
+        main.walkTopDown().filter { it.extension == "kt" && !it.toPath().startsWith(domain.toPath()) && !it.toPath().startsWith(storage.toPath()) }.forEach {
             assertFalse(it.readText().contains("core.marketdataset"), "Unexpected runtime wiring: ${it.name}")
         }
     }
