@@ -25,7 +25,8 @@ object AndroidMarketDatasetDatabase {
         try {
             db.setForeignKeyConstraintsEnabled(true)
             db.execSQL("PRAGMA recursive_triggers=ON")
-            db.execSQL("PRAGMA busy_timeout=5000")
+            // Android owns busy handling on its connections; no fixed millisecond guarantee.
+            // Keep lock exceptions distinct via reportBusy, without adapter-level retries.
             demand(db.rawQuery("PRAGMA journal_mode", null).use { it.moveToFirst(); it.getString(0) } == "delete", MarketStorageError.INCOMPATIBLE_SCHEMA, "JOURNAL_MODE")
             demand(db.rawQuery("PRAGMA synchronous", null).use { it.moveToFirst(); it.getInt(0) } == 2, MarketStorageError.INCOMPATIBLE_SCHEMA, "SYNCHRONOUS")
         } catch (failure: Throwable) { db.close(); throw failure }

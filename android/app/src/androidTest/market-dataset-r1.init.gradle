@@ -1,0 +1,25 @@
+// Test-only compile configuration. Pass explicitly with --init-script.
+// Never changes production build.gradle, source, startup, credentials or capability flags.
+allprojects { candidate ->
+    candidate.plugins.withId('com.android.application') {
+        if (candidate.path != ':app') {
+            throw new GradleException('R1 supports only the audited :app target')
+        }
+        def localFile = candidate.rootProject.file('local.properties')
+        def local = new Properties()
+        if (!localFile.isFile()) throw new GradleException('R1 requires its sanitized local.properties')
+        localFile.withInputStream { local.load(it) }
+        if (local.stringPropertyNames() != ['sdk.dir', 'MANUAL_PAPER_SUBMIT_COMPILED'].toSet() ||
+            local.getProperty('MANUAL_PAPER_SUBMIT_COMPILED') != 'false' ||
+            new File(local.getProperty('sdk.dir')).canonicalFile != new File('C:/Android/Sdk').canonicalFile) {
+            throw new GradleException('R1 rejects credentials, unknown properties or unsafe build flags')
+        }
+        if (candidate.file('src/main/kotlin/com/vela/android/lab/ui/showcase').exists()) {
+            throw new GradleException('R1 must be built from the clean detached production tree')
+        }
+        candidate.extensions.getByName('androidComponents').finalizeDsl { android ->
+            android.defaultConfig.testInstrumentationRunner =
+                'com.vela.android.lab.core.marketdataset.runtime.MarketDatasetR1Runner'
+        }
+    }
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Explicit test manifest selects only this guarded runner; verify the packaged result. -->
+    <instrumentation
+        android:name="com.vela.android.lab.core.marketdataset.runtime.MarketDatasetR1Runner"
+        android:targetPackage="com.vela.android.lab"
+        android:functionalTest="false"
+        android:handleProfiling="false" />
+</manifest>
